@@ -1,0 +1,119 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Random Non-Overlapping Squares (No Grid)</title>
+<style>
+  html,body{margin:0;height:100%;background:#111;display:grid;place-items:center;overflow:hidden;}
+  #field{width:min(94vw,980px);height:min(78vh,720px);background:red;box-shadow:0 10px 35px rgba(0,0,0,.5);border-radius:8px;overflow:hidden;}
+  canvas{width:100%;height:100%;display:block;}
+  #hint{position:fixed;bottom:10px;font:12px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial;color:rgba(255,255,255,.7);text-align:center;padding:0 12px;}
+</style>
+</head>
+<body>
+  <div id="field"><canvas id="c"></canvas></div>
+  <div id="hint">Tap to pause/resume • Double-tap to reset</div>
+
+<script>
+(() => {
+  const field = document.getElementById('field');
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d', { alpha:false });
+
+  // ---- tweakables ----
+  const baseColor = '#ff0000';
+  const squareColor = '#0055ff';
+  const S = 42;      // square size (px)
+  const B = 10;      // buffer (px) around squares (prevents touching/overlap)
+  const perTick = 2; // squares per tick
+  const tickMs = 28; // speed
+  const maxAttemptsPerSquare = 260; // tries before giving up (then reset)
+  // --------------------
+
+  let W=0,H=0,dpr=1;
+  let squares = []; // placed squares: {x,y}
+  let running = true;
+
+  function resize() {
+    const r = field.getBoundingClientRect();
+    dpr = Math.max(1, window.devicePixelRatio || 1);
+    canvas.width = Math.floor(r.width * dpr);
+    canvas.height = Math.floor(r.height * dpr);
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    W = r.width; H = r.height;
+    reset();
+  }
+
+  function reset() {
+    squares = [];
+    ctx.fillStyle = baseColor;
+    ctx.fillRect(0,0,W,H);
+  }
+
+  function overlaps(x,y) {
+    // New square: [x, x+S] x [y, y+S]
+    // Existing squares inflated by buffer B: [sx-B, sx+S+B] x [sy-B, sy+S+B]
+    for (const sq of squares) {
+      const left   = sq.x - B;
+      const right  = sq.x + S + B;
+      const top    = sq.y - B;
+      const bottom = sq.y + S + B;
+
+      const noOverlap =
+        (x + S) <= left  || x >= right ||
+        (y + S) <= top   || y >= bottom;
+
+      if (!noOverlap) return true;
+    }
+    return false;
+  }
+
+  function placeOne() {
+    const maxX = W - S;
+    const maxY = H - S;
+    if (maxX <= 0 || maxY <= 0) return false;
+
+    for (let a=0; a<maxAttemptsPerSquare; a++) {
+      const x = Math.random() * maxX;
+      const y = Math.random() * maxY;
+
+      if (!overlaps(x,y)) {
+        squares.push({x,y});
+        ctx.fillStyle = squareColor;
+        ctx.fillRect(x,y,S,S);
+        return true;
+      }
+    }
+    return false; // area is getting full
+  }
+
+  function tick() {
+    if (!running) return;
+
+    for (let i=0;i<perTick;i++) {
+      const ok = placeOne();
+      if (!ok) {
+        running = false;
+        setTimeout(() => { reset(); running = true; }, 650);
+        break;
+      }
+    }
+  }
+
+  // Tap to pause/resume; double-tap to reset
+  let lastTap = 0;
+  field.addEventListener('pointerdown', () => {
+    const now = Date.now();
+    if (now - lastTap < 350) reset();
+    else running = !running;
+    lastTap = now;
+  });
+
+  window.addEventListener('resize', resize);
+  resize();
+  setInterval(tick, tickMs);
+})();
+</script>
+</body>
+</html>
