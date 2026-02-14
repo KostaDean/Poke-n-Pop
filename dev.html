@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Adaptive Radius Circles</title>
+<title>Adaptive Radius Circles (Large Start)</title>
 <style>
   html,body{margin:0;height:100%;background:#111;display:grid;place-items:center;overflow:hidden;}
   #field{width:min(94vw,980px);height:min(78vh,720px);background:red;box-shadow:0 10px 35px rgba(0,0,0,.5);border-radius:8px;overflow:hidden;}
@@ -25,13 +25,13 @@
   const baseColor = '#ff0000';
   const circleColor = '#0055ff';
 
-  const initialR = 28;     // starting radius
-  const minR = 6;          // smallest radius allowed
-  const shrinkFactor = 0.75; // how much to shrink each stage
-  const buffer = 6;        // spacing between circles
+  const initialR = 60;     // ⬅ Larger starting radius
+  const minR = 6;          
+  const shrinkFactor = 0.72; 
+  const buffer = 6;        
   const perTick = 2;
   const tickMs = 20;
-  const maxAttempts = 300;
+  const maxAttempts = 350;
   // --------------------
 
   let W=0,H=0,dpr=1;
@@ -99,7 +99,7 @@
           R = R * shrinkFactor;
         } else {
           running = false;
-          setTimeout(() => { reset(); running = true; }, 800);
+          setTimeout(() => { reset(); running = true; }, 900);
           return;
         }
       }
