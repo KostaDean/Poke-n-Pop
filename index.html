@@ -1090,87 +1090,63 @@ game.classList.add("goldGlow");
     c.el.style.top    = `${c.cy - r}px`;
   }
 
-  
   function nonOverlappingPlacement(n) {
     const ar = arenaRectInGameCoords();
-    const holdStack = [];
 
-    // Use largest possible radius that can appear (show or recall)
-    const FINAL_R = Math.max(RECALL_RADIUS, SHOW_RADIUS_MAX);
-    const MAX_TRIES = 900;
+    // We only store centers. Radius is fixed by the Size control (RECALL_RADIUS).
+    const R = RECALL_RADIUS;
+    const centers = [];
 
-    for (let i = 0; i < n; i++) {
-      let placed = false;
+    // Try building a full set. If we get stuck, restart (no "overlap fallback").
+    const BUILD_ATTEMPTS = 60;
+    const MAX_TRIES_PER_CIRCLE = 1200;
 
-      for (let t = 0; t < MAX_TRIES; t++) {
+    for (let attempt = 0; attempt < BUILD_ATTEMPTS; attempt++) {
+      centers.length = 0;
 
-        const cx = rand(ar.left + FINAL_R, ar.left + ar.width  - FINAL_R);
-        const cy = rand(ar.top  + FINAL_R, ar.top  + ar.height - FINAL_R);
+      let ok = true;
 
-        let valid = true;
+      for (let i = 0; i < n; i++) {
+        let placed = false;
 
-        for (let c of holdStack) {
-          const D = Math.hypot(cx - c.cx, cy - c.cy);
-          if (D <= 2 * FINAL_R) {
-            valid = false;
+        for (let t = 0; t < MAX_TRIES_PER_CIRCLE; t++) {
+          const cx = rand(ar.left + R, ar.left + ar.width  - R);
+          const cy = rand(ar.top  + R, ar.top  + ar.height - R);
+
+          // minimum distance to all existing centers
+          let minD = Infinity;
+          for (let c of centers) {
+            const D = Math.hypot(cx - c.cx, cy - c.cy);
+            if (D < minD) minD = D;
+            if (minD <= 2 * R) break; // early exit
+          }
+
+          if (minD > 2 * R) {
+            centers.push({ cx, cy });
+            placed = true;
             break;
           }
         }
 
-        if (valid) {
-          holdStack.push({ cx, cy });
-          placed = true;
-          break;
+        if (!placed) {
+          ok = false;
+          break; // restart whole build
         }
       }
 
-      if (!placed) {
-        holdStack.push({
-          cx: rand(ar.left + FINAL_R, ar.left + ar.width  - FINAL_R),
-          cy: rand(ar.top  + FINAL_R, ar.top  + ar.height - FINAL_R)
-        });
-      }
+      if (ok) break;
     }
 
-    return holdStack.map(c => ({
+    // If for some reason we couldn't place all circles, place as many as we could (still non-overlapping).
+    // (With N<=10 and normal sizes, this should not trigger.)
+    const placedCenters = centers.slice(0, n);
+
+    // Show-phase radius can vary (pop circles may overlap — allowed).
+    return placedCenters.map(c => ({
       cx: c.cx,
       cy: c.cy,
       rShow: rand(SHOW_RADIUS_MIN, SHOW_RADIUS_MAX)
     }));
-  }
-
-
-        // Your rule (with optional margin): if D - Rm > f then accept
-        // (Rm is the closest circle's stored radius)
-        if ((minD - closest.r) > (f + margin)) {
-          holdStack.push({ cx, cy, r: rShow });
-          placed = true;
-          break;
-        }
-      }
-
-      // If we couldn't place after many tries, fall back to a best-effort point
-      // (This should be rare in your typical N<=10 use.)
-      if (!placed) {
-        const cx = rand(ar.left + f, ar.left + ar.width  - f);
-        const cy = rand(ar.top  + f, ar.top  + ar.height - f);
-        holdStack.push({ cx, cy, r: rShow });
-      }
-    }
-
-    // Return positions with rShow as expected by the rest of the engine
-    return holdStack.map(c => ({ cx: c.cx, cy: c.cy, rShow: c.r }));
-  }
-      }
-
-      if (!ok) {
-        const rShow = rand(SHOW_RADIUS_MIN, SHOW_RADIUS_MAX);
-        const cx = rand(ar.left + rShow, ar.left + ar.width  - rShow);
-        const cy = rand(ar.top  + rShow, ar.top  + ar.height - rShow);
-        placed.push({ cx, cy, rShow });
-      }
-    }
-    return placed;
   }
 
   async function runRound(token) {
