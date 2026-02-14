@@ -3,10 +3,10 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Adaptive Radius Circles (Large Start)</title>
+<title>Adaptive Radius Circles (Color Cycling)</title>
 <style>
   html,body{margin:0;height:100%;background:#111;display:grid;place-items:center;overflow:hidden;}
-  #field{width:min(94vw,980px);height:min(78vh,720px);background:red;box-shadow:0 10px 35px rgba(0,0,0,.5);border-radius:8px;overflow:hidden;}
+  #field{width:min(94vw,980px);height:min(78vh,720px);background:#000;box-shadow:0 10px 35px rgba(0,0,0,.5);border-radius:8px;overflow:hidden;}
   canvas{width:100%;height:100%;display:block;}
   #hint{position:fixed;bottom:10px;font:12px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial;color:rgba(255,255,255,.7);text-align:center;padding:0 12px;}
 </style>
@@ -22,22 +22,36 @@
   const ctx = canvas.getContext('2d', { alpha:false });
 
   // ---- tweakables ----
-  const baseColor = '#ff0000';
-  const circleColor = '#0055ff';
+  const palette = [
+    {bg:'#ff0000', fg:'#0055ff'}, // red / blue
+    {bg:'#0055ff', fg:'#ff0000'}, // blue / red
+    {bg:'#ffcc00', fg:'#2a00ff'}, // gold / violet-blue
+    {bg:'#00b35a', fg:'#ff3b30'}, // green / coral-red
+  ];
 
-  const initialR = 60;     // ⬅ Larger starting radius
-  const minR = 6;          
-  const shrinkFactor = 0.72; 
-  const buffer = 6;        
+  const initialR = 60;       // starting radius
+  const minR = 6;            // smallest radius allowed
+  const shrinkFactor = 0.72; // shrink each stage
+  const buffer = 6;          // spacing between circles
+
   const perTick = 2;
   const tickMs = 20;
-  const maxAttempts = 350;
+
+  const maxAttempts = 450;        // attempts per circle placement
+  const failsToShrink = 12;       // consecutive failed placements before shrinking radius
+  const failsToResetAtMin = 40;   // consecutive fails at minR before reset
   // --------------------
 
   let W=0,H=0,dpr=1;
-  let circles = [];
+  let circles = [];               // {x,y,r}
   let R = initialR;
   let running = true;
+
+  let colorIndex = 0;
+  let baseColor = palette[0].bg;
+  let circleColor = palette[0].fg;
+
+  let consecutiveFails = 0;
 
   function resize() {
     const r = field.getBoundingClientRect();
@@ -46,12 +60,20 @@
     canvas.height = Math.floor(r.height * dpr);
     ctx.setTransform(dpr,0,0,dpr,0,0);
     W = r.width; H = r.height;
-    reset();
+    reset(true);
   }
 
-  function reset() {
+  function reset(advanceColors) {
     circles = [];
     R = initialR;
+    consecutiveFails = 0;
+
+    if (advanceColors) {
+      colorIndex = (colorIndex + 1) % palette.length;
+    }
+    baseColor = palette[colorIndex].bg;
+    circleColor = palette[colorIndex].fg;
+
     ctx.fillStyle = baseColor;
     ctx.fillRect(0,0,W,H);
   }
@@ -66,23 +88,24 @@
     return false;
   }
 
+  function drawCircle(x,y,r) {
+    ctx.beginPath();
+    ctx.arc(x,y,r,0,Math.PI*2);
+    ctx.fillStyle = circleColor;
+    ctx.fill();
+  }
+
   function placeOne() {
-    const minX = R;
-    const minY = R;
-    const maxX = W - R;
-    const maxY = H - R;
+    const minX = R, minY = R;
+    const maxX = W - R, maxY = H - R;
     if (maxX <= minX || maxY <= minY) return false;
 
     for (let a=0; a<maxAttempts; a++) {
       const x = minX + Math.random() * (maxX - minX);
       const y = minY + Math.random() * (maxY - minY);
-
       if (!overlaps(x,y)) {
         circles.push({x,y,r:R});
-        ctx.beginPath();
-        ctx.arc(x,y,R,0,Math.PI*2);
-        ctx.fillStyle = circleColor;
-        ctx.fill();
+        drawCircle(x,y,R);
         return true;
       }
     }
@@ -94,22 +117,32 @@
 
     for (let i=0;i<perTick;i++) {
       const ok = placeOne();
-      if (!ok) {
-        if (R > minR) {
-          R = R * shrinkFactor;
-        } else {
+      if (ok) {
+        consecutiveFails = 0;
+      } else {
+        consecutiveFails++;
+
+        // Only shrink after several consecutive fails at current radius
+        if (R > minR && consecutiveFails >= failsToShrink) {
+          R = Math.max(minR, R * shrinkFactor);
+          consecutiveFails = 0;
+        }
+
+        // At minR, keep trying for a while; then reset (space is "effectively" full)
+        if (R <= minR && consecutiveFails >= failsToResetAtMin) {
           running = false;
-          setTimeout(() => { reset(); running = true; }, 900);
+          setTimeout(() => { reset(true); running = true; }, 850);
           return;
         }
       }
     }
   }
 
+  // Tap to pause/resume; double-tap to reset (and advance colors)
   let lastTap = 0;
   field.addEventListener('pointerdown', () => {
     const now = Date.now();
-    if (now - lastTap < 350) reset();
+    if (now - lastTap < 350) reset(true);
     else running = !running;
     lastTap = now;
   });
