@@ -1094,20 +1094,24 @@ game.classList.add("goldGlow");
   function nonOverlappingPlacement(n) {
     const ar = arenaRectInGameCoords();
     const holdStack = [];
-    const FINAL_R = RECALL_RADIUS; // true final radius used in recall
-    const MAX_TRIES = 600;
+
+    // Use largest possible radius that can appear (show or recall)
+    const FINAL_R = Math.max(RECALL_RADIUS, SHOW_RADIUS_MAX);
+    const MAX_TRIES = 900;
 
     for (let i = 0; i < n; i++) {
       let placed = false;
 
       for (let t = 0; t < MAX_TRIES; t++) {
+
         const cx = rand(ar.left + FINAL_R, ar.left + ar.width  - FINAL_R);
         const cy = rand(ar.top  + FINAL_R, ar.top  + ar.height - FINAL_R);
 
         let valid = true;
+
         for (let c of holdStack) {
           const D = Math.hypot(cx - c.cx, cy - c.cy);
-          if (D <= 2 * FINAL_R) {  // strict non-overlap at recall size
+          if (D <= 2 * FINAL_R) {
             valid = false;
             break;
           }
@@ -1120,7 +1124,6 @@ game.classList.add("goldGlow");
         }
       }
 
-      // fallback (rare)
       if (!placed) {
         holdStack.push({
           cx: rand(ar.left + FINAL_R, ar.left + ar.width  - FINAL_R),
@@ -1129,7 +1132,6 @@ game.classList.add("goldGlow");
       }
     }
 
-    // rShow may overlap during pop phase (allowed)
     return holdStack.map(c => ({
       cx: c.cx,
       cy: c.cy,
@@ -1137,6 +1139,28 @@ game.classList.add("goldGlow");
     }));
   }
 
+
+        // Your rule (with optional margin): if D - Rm > f then accept
+        // (Rm is the closest circle's stored radius)
+        if ((minD - closest.r) > (f + margin)) {
+          holdStack.push({ cx, cy, r: rShow });
+          placed = true;
+          break;
+        }
+      }
+
+      // If we couldn't place after many tries, fall back to a best-effort point
+      // (This should be rare in your typical N<=10 use.)
+      if (!placed) {
+        const cx = rand(ar.left + f, ar.left + ar.width  - f);
+        const cy = rand(ar.top  + f, ar.top  + ar.height - f);
+        holdStack.push({ cx, cy, r: rShow });
+      }
+    }
+
+    // Return positions with rShow as expected by the rest of the engine
+    return holdStack.map(c => ({ cx: c.cx, cy: c.cy, rShow: c.r }));
+  }
       }
 
       if (!ok) {
