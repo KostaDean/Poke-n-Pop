@@ -1,155 +1,172 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Adaptive Radius Circles (Color Cycling)</title>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+<title>Endless Random Circles (HoldStack)</title>
 <style>
-  html,body{margin:0;height:100%;background:#111;display:grid;place-items:center;overflow:hidden;}
-  #field{width:min(94vw,980px);height:min(78vh,720px);background:#000;box-shadow:0 10px 35px rgba(0,0,0,.5);border-radius:8px;overflow:hidden;}
-  canvas{width:100%;height:100%;display:block;}
-  #hint{position:fixed;bottom:10px;font:12px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial;color:rgba(255,255,255,.7);text-align:center;padding:0 12px;}
+  html,body{margin:0;height:100%;background:#111;overflow:hidden;font-family:-apple-system,system-ui,Segoe UI,Roboto,Arial,sans-serif}
+  #ui{
+    position:fixed;left:12px;top:12px;z-index:10;
+    background:rgba(0,0,0,.45);backdrop-filter: blur(6px);
+    border:1px solid rgba(255,255,255,.12);border-radius:12px;
+    padding:10px 12px;color:#eee;display:flex;gap:10px;align-items:center;flex-wrap:wrap;
+  }
+  #ui button{background:#222;color:#eee;border:1px solid rgba(255,255,255,.18);border-radius:10px;padding:8px 10px;font-size:14px}
+  #ui button:active{transform:scale(.98)}
+  #ui label{display:flex;gap:6px;align-items:center;font-size:13px;opacity:.95}
+  #ui input[type="range"]{width:120px}
+  #stats{font-size:13px;opacity:.9}
+  canvas{display:block}
 </style>
 </head>
 <body>
-  <div id="field"><canvas id="c"></canvas></div>
-  <div id="hint">Tap to pause/resume • Double-tap to reset</div>
+<div id="ui">
+  <button id="toggle">Pause</button>
+  <button id="clear">Clear</button>
+  <label>Speed <input id="speed" type="range" min="1" max="120" value="30"></label>
+  <label>Dot <input id="dot" type="range" min="1" max="6" value="2"></label>
+  <div id="stats">circles: <span id="count">0</span></div>
+</div>
+<canvas id="c"></canvas>
 
 <script>
 (() => {
-  const field = document.getElementById('field');
   const canvas = document.getElementById('c');
-  const ctx = canvas.getContext('2d', { alpha:false });
+  const ctx = canvas.getContext('2d', { alpha: false });
+  const countEl = document.getElementById('count');
+  const speedEl = document.getElementById('speed');
+  const dotEl = document.getElementById('dot');
+  const toggleBtn = document.getElementById('toggle');
+  const clearBtn = document.getElementById('clear');
 
-  // ---- tweakables ----
-  const palette = [
-    {bg:'#ff0000', fg:'#0055ff'}, // red / blue
-    {bg:'#0055ff', fg:'#ff0000'}, // blue / red
-    {bg:'#ffcc00', fg:'#2a00ff'}, // gold / violet-blue
-    {bg:'#00b35a', fg:'#ff3b30'}, // green / coral-red
-  ];
+  // Two colors per your rule (Dm-Rm > 0 => color1, < 0 => color2).
+  const color1 = '#58a6ff'; // outside nearest circle
+  const color2 = '#ff6b6b'; // inside nearest circle
+  const bg = '#111';
 
-  const initialR = 60;       // starting radius
-  const minR = 6;            // smallest radius allowed
-  const shrinkFactor = 0.72; // shrink each stage
-  const buffer = 6;          // spacing between circles
-
-  const perTick = 2;
-  const tickMs = 20;
-
-  const maxAttempts = 450;        // attempts per circle placement
-  const failsToShrink = 12;       // consecutive failed placements before shrinking radius
-  const failsToResetAtMin = 40;   // consecutive fails at minR before reset
-  // --------------------
-
-  let W=0,H=0,dpr=1;
-  let circles = [];               // {x,y,r}
-  let R = initialR;
-  let running = true;
-
-  let colorIndex = 0;
-  let baseColor = palette[0].bg;
-  let circleColor = palette[0].fg;
-
-  let consecutiveFails = 0;
-
+  let W = 0, H = 0, DPR = 1;
   function resize() {
-    const r = field.getBoundingClientRect();
-    dpr = Math.max(1, window.devicePixelRatio || 1);
-    canvas.width = Math.floor(r.width * dpr);
-    canvas.height = Math.floor(r.height * dpr);
-    ctx.setTransform(dpr,0,0,dpr,0,0);
-    W = r.width; H = r.height;
-    reset(true);
+    DPR = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+    W = Math.floor(window.innerWidth);
+    H = Math.floor(window.innerHeight);
+    canvas.width = Math.floor(W * DPR);
+    canvas.height = Math.floor(H * DPR);
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    // repaint background
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, W, H);
+    // redraw all circles
+    for (const cir of holdStack) drawCircle(cir);
+  }
+  window.addEventListener('resize', resize, { passive: true });
+
+  // HoldStack: stores {x,y,r,sign}
+  const holdStack = [];
+
+  function rand(min, max) { return min + Math.random() * (max - min); }
+
+  function drawCircle(cir) {
+    const {x,y,r,sign} = cir;
+    const stroke = (sign >= 0) ? color1 : color2;
+
+    // circle outline
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.strokeStyle = stroke;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // center dot
+    const dotR = Number(dotEl.value) || 2;
+    ctx.beginPath();
+    ctx.arc(x, y, dotR, 0, Math.PI * 2);
+    ctx.fillStyle = stroke;
+    ctx.fill();
+
+    // radius tick (line to the right)
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + r, y);
+    ctx.strokeStyle = stroke;
+    ctx.lineWidth = 1;
+    ctx.stroke();
   }
 
-  function reset(advanceColors) {
-    circles = [];
-    R = initialR;
-    consecutiveFails = 0;
+  function addOneCircle() {
+    const x = rand(10, W - 10);
+    const y = rand(10, H - 10);
 
-    if (advanceColors) {
-      colorIndex = (colorIndex + 1) % palette.length;
+    // First circle: pick a reasonable starter radius
+    if (holdStack.length === 0) {
+      const r0 = Math.min(W, H) * 0.12;
+      const cir0 = { x, y, r: Math.max(6, r0), sign: 1 };
+      holdStack.push(cir0);
+      drawCircle(cir0);
+      countEl.textContent = String(holdStack.length);
+      return;
     }
-    baseColor = palette[colorIndex].bg;
-    circleColor = palette[colorIndex].fg;
 
-    ctx.fillStyle = baseColor;
-    ctx.fillRect(0,0,W,H);
-  }
+    // Find minimum distance Dm to any saved center; also grab that circle's radius Rm
+    let best = null;
+    let bestD = Infinity;
 
-  function overlaps(x,y) {
-    for (const c of circles) {
+    for (const c of holdStack) {
       const dx = x - c.x;
       const dy = y - c.y;
-      const minDist = c.r + R + buffer;
-      if (dx*dx + dy*dy < minDist*minDist) return true;
+      const d = Math.hypot(dx, dy);
+      if (d < bestD) { bestD = d; best = c; }
     }
-    return false;
+
+    const Dm = bestD;
+    const Rm = best.r;
+    const diff = Dm - Rm;
+
+    // Your formula: abs(Dm-Rm) - 3
+    let rNew = Math.abs(diff) - 3;
+
+    // Practical guardrails so it keeps drawing (negative/too tiny radii are not drawable)
+    // This doesn't change the rule; it just skips/limits degenerate circles.
+    if (!Number.isFinite(rNew) || rNew < 1) return;
+
+    // Avoid absurdly large circles that fill everything.
+    const rMax = Math.min(W, H) * 0.45;
+    if (rNew > rMax) rNew = rMax;
+
+    const cir = { x, y, r: rNew, sign: (diff >= 0 ? 1 : -1) };
+    holdStack.push(cir);
+    drawCircle(cir);
+    countEl.textContent = String(holdStack.length);
   }
 
-  function drawCircle(x,y,r) {
-    ctx.beginPath();
-    ctx.arc(x,y,r,0,Math.PI*2);
-    ctx.fillStyle = circleColor;
-    ctx.fill();
-  }
-
-  function placeOne() {
-    const minX = R, minY = R;
-    const maxX = W - R, maxY = H - R;
-    if (maxX <= minX || maxY <= minY) return false;
-
-    for (let a=0; a<maxAttempts; a++) {
-      const x = minX + Math.random() * (maxX - minX);
-      const y = minY + Math.random() * (maxY - minY);
-      if (!overlaps(x,y)) {
-        circles.push({x,y,r:R});
-        drawCircle(x,y,R);
-        return true;
-      }
-    }
-    return false;
-  }
-
-  function tick() {
-    if (!running) return;
-
-    for (let i=0;i<perTick;i++) {
-      const ok = placeOne();
-      if (ok) {
-        consecutiveFails = 0;
-      } else {
-        consecutiveFails++;
-
-        // Only shrink after several consecutive fails at current radius
-        if (R > minR && consecutiveFails >= failsToShrink) {
-          R = Math.max(minR, R * shrinkFactor);
-          consecutiveFails = 0;
-        }
-
-        // At minR, keep trying for a while; then reset (space is "effectively" full)
-        if (R <= minR && consecutiveFails >= failsToResetAtMin) {
-          running = false;
-          setTimeout(() => { reset(true); running = true; }, 850);
-          return;
-        }
-      }
-    }
-  }
-
-  // Tap to pause/resume; double-tap to reset (and advance colors)
-  let lastTap = 0;
-  field.addEventListener('pointerdown', () => {
-    const now = Date.now();
-    if (now - lastTap < 350) reset(true);
-    else running = !running;
-    lastTap = now;
+  let running = true;
+  toggleBtn.addEventListener('click', () => {
+    running = !running;
+    toggleBtn.textContent = running ? 'Pause' : 'Resume';
   });
 
-  window.addEventListener('resize', resize);
+  clearBtn.addEventListener('click', () => {
+    holdStack.length = 0;
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, W, H);
+    countEl.textContent = '0';
+  });
+
+  // Main loop: add N circles per frame depending on speed slider
+  function frame() {
+    if (running) {
+      const perFrame = Math.max(1, Math.floor(Number(speedEl.value) / 10));
+      // Also modulate by FPS-ish: if speed is low, add fewer.
+      const extra = Number(speedEl.value) >= 60 ? 2 : 1;
+      for (let i = 0; i < perFrame * extra; i++) addOneCircle();
+    }
+    requestAnimationFrame(frame);
+  }
+
   resize();
-  setInterval(tick, tickMs);
+  requestAnimationFrame(frame);
 })();
 </script>
 </body>
