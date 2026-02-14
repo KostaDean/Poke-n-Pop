@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Random Non-Overlapping Circles</title>
+<title>Poisson-Disk Circles (Elegant Spacing)</title>
 <style>
   html,body{margin:0;height:100%;background:#111;display:grid;place-items:center;overflow:hidden;}
   #field{width:min(94vw,980px);height:min(78vh,720px);background:red;box-shadow:0 10px 35px rgba(0,0,0,.5);border-radius:8px;overflow:hidden;}
@@ -22,18 +22,105 @@
   const ctx = canvas.getContext('2d', { alpha:false });
 
   // ---- tweakables ----
-  const baseColor = '#ff0000';
+  const baseColor   = '#ff0000';
   const circleColor = '#0055ff';
-  const R = 22;      // circle radius
-  const B = 6;       // buffer between circles
-  const perTick = 2;
-  const tickMs = 28;
-  const maxAttemptsPerCircle = 300;
+
+  const R = 22;        // circle radius
+  const buffer = 8;    // extra spacing between circles
+  const k = 24;        // candidates per active point (higher = denser, slower)
+  const drawPerTick = 2;   // how many circles to draw per tick
+  const tickMs = 18;       // animation speed
+  const pauseAfterFillMs = 650;
   // --------------------
 
   let W=0,H=0,dpr=1;
-  let circles = [];
   let running = true;
+  let pointsToDraw = []; // precomputed poisson points (centers)
+
+  function rand(a,b){ return a + Math.random()*(b-a); }
+
+  // Bridson Poisson disk sampling with grid acceleration
+  function poissonDisk(width, height, minDist, tries) {
+    // Keep circles fully inside by sampling centers in [R, W-R] x [R, H-R]
+    const x0 = R, y0 = R, x1 = width - R, y1 = height - R;
+    const w = x1 - x0, h = y1 - y0;
+    if (w <= 0 || h <= 0) return [];
+
+    const cellSize = minDist / Math.SQRT2;
+    const gridW = Math.ceil(w / cellSize);
+    const gridH = Math.ceil(h / cellSize);
+    const grid = new Array(gridW * gridH).fill(-1);
+
+    const samples = [];
+    const active = [];
+
+    function gridIndex(px, py) {
+      const gx = Math.floor((px - x0) / cellSize);
+      const gy = Math.floor((py - y0) / cellSize);
+      return {gx, gy, gi: gy * gridW + gx};
+    }
+
+    function inBounds(px, py) {
+      return px >= x0 && px <= x1 && py >= y0 && py <= y1;
+    }
+
+    function farEnough(px, py) {
+      const {gx, gy} = gridIndex(px, py);
+      const r = 2; // check neighboring cells within 2 in each direction (safe for cellSize=minDist/sqrt2)
+      for (let yy = Math.max(0, gy - r); yy <= Math.min(gridH - 1, gy + r); yy++) {
+        for (let xx = Math.max(0, gx - r); xx <= Math.min(gridW - 1, gx + r); xx++) {
+          const idx = grid[yy * gridW + xx];
+          if (idx !== -1) {
+            const q = samples[idx];
+            const dx = px - q.x;
+            const dy = py - q.y;
+            if (dx*dx + dy*dy < minDist*minDist) return false;
+          }
+        }
+      }
+      return true;
+    }
+
+    // initial sample
+    const p0 = {x: rand(x0, x1), y: rand(y0, y1)};
+    samples.push(p0);
+    active.push(0);
+    grid[gridIndex(p0.x, p0.y).gi] = 0;
+
+    while (active.length) {
+      // pick a random active point
+      const ai = (Math.random() * active.length) | 0;
+      const sIndex = active[ai];
+      const s = samples[sIndex];
+      let found = false;
+
+      for (let t = 0; t < tries; t++) {
+        // random point in the annulus [minDist, 2*minDist]
+        const ang = Math.random() * Math.PI * 2;
+        const mag = rand(minDist, 2 * minDist);
+        const px = s.x + Math.cos(ang) * mag;
+        const py = s.y + Math.sin(ang) * mag;
+
+        if (inBounds(px, py) && farEnough(px, py)) {
+          const p = {x: px, y: py};
+          const newIndex = samples.length;
+          samples.push(p);
+          active.push(newIndex);
+          grid[gridIndex(px, py).gi] = newIndex;
+          found = true;
+          break;
+        }
+      }
+
+      if (!found) {
+        // retire this active point
+        active[ai] = active[active.length - 1];
+        active.pop();
+      }
+    }
+
+    return samples;
+  }
 
   function resize() {
     const r = field.getBoundingClientRect();
@@ -46,57 +133,43 @@
   }
 
   function reset() {
-    circles = [];
     ctx.fillStyle = baseColor;
     ctx.fillRect(0,0,W,H);
+
+    const minDist = (2 * R) + buffer;
+    pointsToDraw = poissonDisk(W, H, minDist, k);
+
+    // Shuffle draw order so it “appears” random even though spacing is elegant
+    for (let i = pointsToDraw.length - 1; i > 0; i--) {
+      const j = (Math.random() * (i + 1)) | 0;
+      const tmp = pointsToDraw[i]; pointsToDraw[i] = pointsToDraw[j]; pointsToDraw[j] = tmp;
+    }
   }
 
-  function overlaps(x,y) {
-    for (const c of circles) {
-      const dx = x - c.x;
-      const dy = y - c.y;
-      const dist = Math.sqrt(dx*dx + dy*dy);
-      if (dist < (R + R + B)) return true;
-    }
-    return false;
-  }
-
-  function placeOne() {
-    const minX = R;
-    const minY = R;
-    const maxX = W - R;
-    const maxY = H - R;
-    if (maxX <= minX || maxY <= minY) return false;
-
-    for (let a=0; a<maxAttemptsPerCircle; a++) {
-      const x = minX + Math.random() * (maxX - minX);
-      const y = minY + Math.random() * (maxY - minY);
-
-      if (!overlaps(x,y)) {
-        circles.push({x,y});
-        ctx.beginPath();
-        ctx.arc(x,y,R,0,Math.PI*2);
-        ctx.fillStyle = circleColor;
-        ctx.fill();
-        return true;
-      }
-    }
-    return false;
+  function drawCircle(x,y) {
+    ctx.beginPath();
+    ctx.arc(x,y,R,0,Math.PI*2);
+    ctx.fillStyle = circleColor;
+    ctx.fill();
   }
 
   function tick() {
     if (!running) return;
 
-    for (let i=0;i<perTick;i++) {
-      const ok = placeOne();
-      if (!ok) {
-        running = false;
-        setTimeout(() => { reset(); running = true; }, 650);
-        break;
-      }
+    if (pointsToDraw.length === 0) {
+      running = false;
+      setTimeout(() => { reset(); running = true; }, pauseAfterFillMs);
+      return;
+    }
+
+    const n = Math.min(drawPerTick, pointsToDraw.length);
+    for (let i=0;i<n;i++) {
+      const p = pointsToDraw.pop();
+      drawCircle(p.x, p.y);
     }
   }
 
+  // Tap to pause/resume; double-tap to reset
   let lastTap = 0;
   field.addEventListener('pointerdown', () => {
     const now = Date.now();
