@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>HoldStack Circles (Always Outside, One Color)</title>
+  <title>HoldStack Circles (Reject Overlap)</title>
   <style>
     html, body{
       margin:0; padding:0; height:100%;
@@ -14,6 +14,7 @@
       font-family:-apple-system, system-ui, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
     }
     #c{display:block; width:100vw; height:100vh;}
+
     #ui{
       position:fixed; left:12px; right:12px; top:12px; z-index:10;
       display:flex; gap:10px; align-items:center; flex-wrap:wrap;
@@ -38,7 +39,7 @@
       background:rgba(20,28,38,0.55);
       backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px);
       color:#e9eef6; font-size:12px; line-height:1.25;
-      max-width:82vw; box-sizing:border-box;
+      max-width:86vw; box-sizing:border-box;
     }
     .mono{font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;}
   </style>
@@ -54,17 +55,21 @@
   <input id="pad" type="range" min="0" max="30" value="6" />
   <span id="padVal">6</span>
 
-  <label>Min r</label>
-  <input id="minr" type="range" min="2" max="60" value="10" />
-  <span id="minrVal">10</span>
+  <label>r min</label>
+  <input id="rmin" type="range" min="2" max="80" value="12" />
+  <span id="rminVal">12</span>
+
+  <label>r max</label>
+  <input id="rmax" type="range" min="10" max="260" value="120" />
+  <span id="rmaxVal">120</span>
 
   <div id="stats">N=0</div>
 </div>
 
 <div id="hint">
-  New circle is forced to be <b>outside all existing circles</b> (no overlap).<br/>
-  For a random center, we compute: <span class="mono">r = min_i (dist(center, ci) - ri) - padding</span>.<br/>
-  If <span class="mono">r</span> is too small, we retry with a new random center.
+  Tap <b>Next</b> to attempt to add one random circle. A circle is accepted only if, for <i>every</i> existing circle:<br/>
+  <span class="mono">dist(centers) &gt; (r_new + r_i + padding)</span> (otherwise it is discarded and we retry).<br/>
+  This uses a HoldStack of {x,y,r}. If the screen gets too crowded, Next may fail to add a circle.
 </div>
 
 <script>
@@ -72,21 +77,23 @@
   const canvas = document.getElementById('c');
   const ctx = canvas.getContext('2d', { alpha:false });
 
-  // Single color
+  // One color for all circles
   const C = { fill:"rgba(70,130,255,0.22)", stroke:"rgba(70,130,255,0.85)" };
 
+  // HoldStack: array of {x,y,r}
   let holdStack = [];
 
   const nextBtn = document.getElementById('next');
   const resetBtn = document.getElementById('reset');
   const padEl = document.getElementById('pad');
   const padVal = document.getElementById('padVal');
-  const minrEl = document.getElementById('minr');
-  const minrVal = document.getElementById('minrVal');
+  const rminEl = document.getElementById('rmin');
+  const rminVal = document.getElementById('rminVal');
+  const rmaxEl = document.getElementById('rmax');
+  const rmaxVal = document.getElementById('rmaxVal');
   const statsEl = document.getElementById('stats');
 
   function rand(min, max){ return min + Math.random()*(max-min); }
-  function clamp(v,a,b){ return Math.max(a, Math.min(b,v)); }
 
   function resize(){
     const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
@@ -120,6 +127,15 @@
     for (const c of holdStack) drawCircle(c);
   }
 
+  // Non-overlap test against ALL circles in HoldStack
+  function fitsAll(cNew, padding){
+    for (const c of holdStack){
+      const d = Math.hypot(cNew.x - c.x, cNew.y - c.y);
+      if (d <= (cNew.r + c.r + padding)) return false; // overlap / too close
+    }
+    return true;
+  }
+
   function init(){
     holdStack = [];
     clearCanvas();
@@ -128,75 +144,58 @@
     const w = window.innerWidth, h = window.innerHeight;
     const r0 = rand(Math.min(w,h)*0.08, Math.min(w,h)*0.18);
     const c0 = {
-      x: rand(r0, w-r0),
-      y: rand(r0, h-r0),
-      r: r0
+      r: r0,
+      x: rand(r0, w - r0),
+      y: rand(r0, h - r0)
     };
     holdStack.push(c0);
     drawCircle(c0);
     statsEl.textContent = `N=${holdStack.length}`;
   }
 
-  // Compute maximum allowed radius at (x,y) so circle stays outside all existing circles.
-  function allowedRadiusAt(x, y, padding){
-    let r = Infinity;
-    for (const c of holdStack){
-      const d = Math.hypot(x - c.x, y - c.y);
-      r = Math.min(r, d - c.r);
-    }
-    return r - padding; // enforce a gap
-  }
-
   function stepOnce(){
     const w = window.innerWidth, h = window.innerHeight;
     const padding = parseFloat(padEl.value) || 0;
-    const rMin = parseFloat(minrEl.value) || 2;
-    const rMax = Math.min(w,h) * 0.45;
 
-    // Try a bunch of random centers until we find one that yields a decent radius
-    const MAX_TRIES = 800;
+    let rMin = parseFloat(rminEl.value) || 2;
+    let rMax = parseFloat(rmaxEl.value) || 50;
+    if (rMax < rMin) { const tmp=rMin; rMin=rMax; rMax=tmp; }
+
+    // Rejection sampling: pick random center AND radius; accept only if non-overlapping with ALL existing circles
+    const MAX_TRIES = 3000;
     for (let t=0; t<MAX_TRIES; t++){
-      // pick a center with generous margin so we can keep it on-screen after radius is known
-      const x = rand(0, w);
-      const y = rand(0, h);
+      const r = rand(rMin, rMax);
 
-      let r = allowedRadiusAt(x, y, padding);
-      if (!isFinite(r)) continue;
-      r = clamp(r, 0, rMax);
+      // keep on-screen
+      const x = rand(r, w - r);
+      const y = rand(r, h - r);
 
-      if (r < rMin) continue;
+      const cNew = { x, y, r };
 
-      // keep on-screen by clamping center after radius known
-      const xc = clamp(x, r, w - r);
-      const yc = clamp(y, r, h - r);
-
-      // Re-check after clamping (center changed slightly)
-      r = allowedRadiusAt(xc, yc, padding);
-      r = clamp(r, 0, rMax);
-      if (r < rMin) continue;
-
-      const cNew = { x: xc, y: yc, r: r };
-      holdStack.push(cNew);
-      drawCircle(cNew);
-      statsEl.textContent = `N=${holdStack.length}`;
-      return;
+      if (fitsAll(cNew, padding)){
+        holdStack.push(cNew);
+        drawCircle(cNew);
+        statsEl.textContent = `N=${holdStack.length}`;
+        return true;
+      }
     }
-
-    // If we failed, do nothing (means too crowded)
-    // You can hit Reset to start over.
+    // too crowded or radii too large: no circle added
+    return false;
   }
 
-  nextBtn.addEventListener('click', () => stepOnce());
+  nextBtn.addEventListener('click', () => { stepOnce(); });
   resetBtn.addEventListener('click', () => init());
 
   padEl.addEventListener('input', () => padVal.textContent = `${padEl.value}`);
-  minrEl.addEventListener('input', () => minrVal.textContent = `${minrEl.value}`);
+  rminEl.addEventListener('input', () => rminVal.textContent = `${rminEl.value}`);
+  rmaxEl.addEventListener('input', () => rmaxVal.textContent = `${rmaxEl.value}`);
 
   document.addEventListener('touchmove', (e)=>e.preventDefault(), {passive:false});
 
   resize();
   padVal.textContent = `${padEl.value}`;
-  minrVal.textContent = `${minrEl.value}`;
+  rminVal.textContent = `${rminEl.value}`;
+  rmaxVal.textContent = `${rmaxEl.value}`;
   init();
 })();
 </script>
