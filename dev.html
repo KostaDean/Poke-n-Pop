@@ -3,22 +3,20 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
-<title>Endless Filled Circles (HoldStack)</title>
+<title>Endless Random Circles (HoldStack)</title>
 <style>
-  html,body{margin:0;height:100%;overflow:hidden;font-family:-apple-system,system-ui,Segoe UI,Roboto,Arial,sans-serif}
-  body{background:#070812}
+  html,body{margin:0;height:100%;background:#111;overflow:hidden;font-family:-apple-system,system-ui,Segoe UI,Roboto,Arial,sans-serif}
   #ui{
     position:fixed;left:12px;top:12px;z-index:10;
     background:rgba(0,0,0,.45);backdrop-filter: blur(6px);
     border:1px solid rgba(255,255,255,.12);border-radius:12px;
     padding:10px 12px;color:#eee;display:flex;gap:10px;align-items:center;flex-wrap:wrap;
   }
-  #ui button{background:#18181f;color:#eee;border:1px solid rgba(255,255,255,.18);border-radius:10px;padding:8px 10px;font-size:14px}
+  #ui button{background:#222;color:#eee;border:1px solid rgba(255,255,255,.18);border-radius:10px;padding:8px 10px;font-size:14px}
   #ui button:active{transform:scale(.98)}
   #ui label{display:flex;gap:6px;align-items:center;font-size:13px;opacity:.95}
-  #ui input[type="range"]{width:130px}
-  #stats{font-size:13px;opacity:.9;display:flex;gap:10px;align-items:center}
-  .swatch{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:-1px}
+  #ui input[type="range"]{width:120px}
+  #stats{font-size:13px;opacity:.9}
   canvas{display:block}
 </style>
 </head>
@@ -26,97 +24,99 @@
 <div id="ui">
   <button id="toggle">Pause</button>
   <button id="clear">Clear</button>
-  <label>Circles/sec <input id="speed" type="range" min="1" max="60" value="12"></label>
-  <label>Opacity <input id="alpha" type="range" min="0.05" max="1" step="0.05" value="0.35"></label>
-  <div id="stats">
-    <span>circles: <span id="count">0</span></span>
-    <span><span class="swatch" id="sw1"></span>outside</span>
-    <span><span class="swatch" id="sw2"></span>inside</span>
-  </div>
+  <label>Speed <input id="speed" type="range" min="1" max="120" value="30"></label>
+  <label>Dot <input id="dot" type="range" min="1" max="6" value="2"></label>
+  <div id="stats">circles: <span id="count">0</span></div>
 </div>
 <canvas id="c"></canvas>
 
 <script>
 (() => {
   const canvas = document.getElementById('c');
-  const ctx = canvas.getContext('2d', { alpha:false });
-
+  const ctx = canvas.getContext('2d', { alpha: false });
   const countEl = document.getElementById('count');
   const speedEl = document.getElementById('speed');
-  const alphaEl = document.getElementById('alpha');
+  const dotEl = document.getElementById('dot');
   const toggleBtn = document.getElementById('toggle');
   const clearBtn = document.getElementById('clear');
 
-  // Background + 2 circle colors (default + "inside another circle" color)
-  const bg = '#070812';
-  const fillOutside = '#00E5FF';
-  const fillInside  = '#FF2ED1';
+  // Two colors per your rule (Dm-Rm > 0 => color1, < 0 => color2).
+  const color1 = '#58a6ff'; // outside nearest circle
+  const color2 = '#ff6b6b'; // inside nearest circle
+  const bg = '#111';
 
-  document.getElementById('sw1').style.background = fillOutside;
-  document.getElementById('sw2').style.background = fillInside;
-
-  let W=0, H=0, DPR=1;
+  let W = 0, H = 0, DPR = 1;
   function resize() {
     DPR = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
     W = Math.floor(window.innerWidth);
     H = Math.floor(window.innerHeight);
-
     canvas.width = Math.floor(W * DPR);
     canvas.height = Math.floor(H * DPR);
     canvas.style.width = W + 'px';
     canvas.style.height = H + 'px';
-
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-
+    // repaint background
     ctx.fillStyle = bg;
-    ctx.fillRect(0,0,W,H);
-
-    for (const c of holdStack) drawCircle(c);
+    ctx.fillRect(0, 0, W, H);
+    // redraw all circles
+    for (const cir of holdStack) drawCircle(cir);
   }
-  window.addEventListener('resize', resize, { passive:true });
+  window.addEventListener('resize', resize, { passive: true });
 
-  // HoldStack items: {x,y,r,inside:boolean}
+  // HoldStack: stores {x,y,r,sign}
   const holdStack = [];
 
-  const rand = (a,b)=> a + Math.random()*(b-a);
+  function rand(min, max) { return min + Math.random() * (max - min); }
 
-  function drawCircle(c) {
-    const a = Number(alphaEl.value) || 0.35;
-    ctx.globalAlpha = a;
+  function drawCircle(cir) {
+    const {x,y,r,sign} = cir;
+    const stroke = (sign >= 0) ? color1 : color2;
 
-    ctx.fillStyle = c.inside ? fillInside : fillOutside;
+    // circle outline
     ctx.beginPath();
-    ctx.arc(c.x, c.y, c.r, 0, Math.PI*2);
-    ctx.fill();
-
-    // optional crisp edge
-    ctx.globalAlpha = Math.min(1, a + 0.25);
-    ctx.strokeStyle = c.inside ? fillInside : fillOutside;
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.strokeStyle = stroke;
     ctx.lineWidth = 1;
     ctx.stroke();
 
-    ctx.globalAlpha = 1;
+    // center dot
+    const dotR = Number(dotEl.value) || 2;
+    ctx.beginPath();
+    ctx.arc(x, y, dotR, 0, Math.PI * 2);
+    ctx.fillStyle = stroke;
+    ctx.fill();
+
+    // radius tick (line to the right)
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + r, y);
+    ctx.strokeStyle = stroke;
+    ctx.lineWidth = 1;
+    ctx.stroke();
   }
 
   function addOneCircle() {
-    const x = rand(10, W-10);
-    const y = rand(10, H-10);
+    const x = rand(10, W - 10);
+    const y = rand(10, H - 10);
 
+    // First circle: pick a reasonable starter radius
     if (holdStack.length === 0) {
-      const r0 = Math.max(12, Math.min(W,H)*0.10);
-      const c0 = {x,y,r:r0,inside:false};
-      holdStack.push(c0);
-      drawCircle(c0);
+      const r0 = Math.min(W, H) * 0.12;
+      const cir0 = { x, y, r: Math.max(6, r0), sign: 1 };
+      holdStack.push(cir0);
+      drawCircle(cir0);
       countEl.textContent = String(holdStack.length);
       return;
     }
 
-    // Find nearest center (minimum Dm) and its radius Rm
-    let best = holdStack[0];
+    // Find minimum distance Dm to any saved center; also grab that circle's radius Rm
+    let best = null;
     let bestD = Infinity;
 
     for (const c of holdStack) {
-      const d = Math.hypot(x - c.x, y - c.y);
+      const dx = x - c.x;
+      const dy = y - c.y;
+      const d = Math.hypot(dx, dy);
       if (d < bestD) { bestD = d; best = c; }
     }
 
@@ -124,20 +124,20 @@
     const Rm = best.r;
     const diff = Dm - Rm;
 
-    // radius = abs(Dm - Rm) - 3
+    // Your formula: abs(Dm-Rm) - 3
     let rNew = Math.abs(diff) - 3;
 
-    // skip degenerate
+    // Practical guardrails so it keeps drawing (negative/too tiny radii are not drawable)
+    // This doesn't change the rule; it just skips/limits degenerate circles.
     if (!Number.isFinite(rNew) || rNew < 1) return;
 
-    // cap huge
-    const rMax = Math.min(W,H) * 0.48;
+    // Avoid absurdly large circles that fill everything.
+    const rMax = Math.min(W, H) * 0.45;
     if (rNew > rMax) rNew = rMax;
 
-    const inside = (diff < 0); // if center is inside that nearest circle => switch color
-    const cNew = {x,y,r:rNew,inside};
-    holdStack.push(cNew);
-    drawCircle(cNew);
+    const cir = { x, y, r: rNew, sign: (diff >= 0 ? 1 : -1) };
+    holdStack.push(cir);
+    drawCircle(cir);
     countEl.textContent = String(holdStack.length);
   }
 
@@ -150,28 +150,18 @@
   clearBtn.addEventListener('click', () => {
     holdStack.length = 0;
     ctx.fillStyle = bg;
-    ctx.fillRect(0,0,W,H);
+    ctx.fillRect(0, 0, W, H);
     countEl.textContent = '0';
   });
 
-  // Time-based speed control (circles per second)
-  let lastT = performance.now();
-  let acc = 0;
-
-  function frame(t) {
-    const dt = Math.min(0.05, (t - lastT) / 1000);
-    lastT = t;
-
+  // Main loop: add N circles per frame depending on speed slider
+  function frame() {
     if (running) {
-      const cps = Number(speedEl.value) || 12;
-      acc += dt * cps;
-      const n = Math.floor(acc);
-      if (n > 0) {
-        acc -= n;
-        for (let i=0; i<n; i++) addOneCircle();
-      }
+      const perFrame = Math.max(1, Math.floor(Number(speedEl.value) / 10));
+      // Also modulate by FPS-ish: if speed is low, add fewer.
+      const extra = Number(speedEl.value) >= 60 ? 2 : 1;
+      for (let i = 0; i < perFrame * extra; i++) addOneCircle();
     }
-
     requestAnimationFrame(frame);
   }
 
