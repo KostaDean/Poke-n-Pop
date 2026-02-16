@@ -3,260 +3,201 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>HoldStack Circles (Tap Next)</title>
+  <title>HoldStack Circles (Always Outside, One Color)</title>
   <style>
-    html, body {
-      margin: 0;
-      padding: 0;
-      height: 100%;
-      overflow: hidden;
-      background: #0b0f14;
-      touch-action: none;
-      -webkit-user-select: none;
-      user-select: none;
-      font-family: -apple-system, system-ui, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+    html, body{
+      margin:0; padding:0; height:100%;
+      overflow:hidden;
+      background:#0b0f14;
+      touch-action:none;
+      -webkit-user-select:none; user-select:none;
+      font-family:-apple-system, system-ui, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
     }
-    #c { display:block; width:100vw; height:100vh; }
+    #c{display:block; width:100vw; height:100vh;}
+    #ui{
+      position:fixed; left:12px; right:12px; top:12px; z-index:10;
+      display:flex; gap:10px; align-items:center; flex-wrap:wrap;
+      padding:10px 12px; border-radius:12px;
+      background:rgba(20,28,38,0.72);
+      backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px);
+      color:#e9eef6; box-sizing:border-box;
+    }
+    #ui button{
+      border:0; border-radius:10px; padding:10px 12px;
+      font-size:14px; font-weight:600; color:#e9eef6;
+      background:rgba(255,255,255,0.10); white-space:nowrap;
+    }
+    #ui button:active{transform:scale(0.98);}
+    #ui label{font-size:13px; opacity:0.9;}
+    #ui input[type="range"]{width:140px;}
+    #stats{margin-left:auto; font-size:12px; opacity:0.9;}
 
-    #ui {
-      position: fixed;
-      left: 12px;
-      right: 12px;
-      top: 12px;
-      z-index: 10;
-      display: flex;
-      gap: 10px;
-      align-items: center;
-      padding: 10px 12px;
-      border-radius: 12px;
-      background: rgba(20, 28, 38, 0.72);
-      backdrop-filter: blur(8px);
-      -webkit-backdrop-filter: blur(8px);
-      color: #e9eef6;
-      box-sizing: border-box;
-      flex-wrap: wrap;
+    #hint{
+      position:fixed; left:12px; bottom:12px; z-index:10;
+      padding:10px 12px; border-radius:12px;
+      background:rgba(20,28,38,0.55);
+      backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px);
+      color:#e9eef6; font-size:12px; line-height:1.25;
+      max-width:82vw; box-sizing:border-box;
     }
-    #ui button {
-      border: 0;
-      border-radius: 10px;
-      padding: 10px 12px;
-      font-size: 14px;
-      font-weight: 600;
-      color: #e9eef6;
-      background: rgba(255,255,255,0.10);
-      white-space: nowrap;
-    }
-    #ui button:active { transform: scale(0.98); }
-    #ui label { font-size: 13px; opacity: 0.9; }
-    #ui input[type="range"] { width: 140px; }
-    #stats { margin-left: auto; font-size: 12px; opacity: 0.9; }
-
-    #hint {
-      position: fixed;
-      left: 12px;
-      bottom: 12px;
-      z-index: 10;
-      padding: 10px 12px;
-      border-radius: 12px;
-      background: rgba(20, 28, 38, 0.55);
-      backdrop-filter: blur(8px);
-      -webkit-backdrop-filter: blur(8px);
-      color: #e9eef6;
-      font-size: 12px;
-      line-height: 1.25;
-      max-width: 78vw;
-      box-sizing: border-box;
-    }
-    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    .mono{font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;}
   </style>
 </head>
 <body>
-  <canvas id="c"></canvas>
+<canvas id="c"></canvas>
 
-  <div id="ui">
-    <button id="next">Next</button>
-    <button id="auto">Auto: Off</button>
-    <button id="reset">Reset</button>
+<div id="ui">
+  <button id="next">Next</button>
+  <button id="reset">Reset</button>
 
-    <label>Speed</label>
-    <input id="speed" type="range" min="1" max="120" value="18" />
-    <span id="speedVal">18/s</span>
+  <label>Padding</label>
+  <input id="pad" type="range" min="0" max="30" value="6" />
+  <span id="padVal">6</span>
 
-    <label>Padding</label>
-    <input id="pad" type="range" min="0" max="20" value="4" />
-    <span id="padVal">4</span>
+  <label>Min r</label>
+  <input id="minr" type="range" min="2" max="60" value="10" />
+  <span id="minrVal">10</span>
 
-    <div id="stats">N=0</div>
-  </div>
+  <div id="stats">N=0</div>
+</div>
 
-  <div id="hint">
-    Tap <b>Next</b> to create one circle at a time.<br/>
-    Rule: pick random center → find closest circle by center distance (<span class="mono">Dm</span>). Let its radius be <span class="mono">Rm</span>.<br/>
-    New radius = <span class="mono">|Dm − Rm| + padding</span>. If <span class="mono">Dm &lt; Rm</span> (inside) → flip color; else keep same color.
-  </div>
+<div id="hint">
+  New circle is forced to be <b>outside all existing circles</b> (no overlap).<br/>
+  For a random center, we compute: <span class="mono">r = min_i (dist(center, ci) - ri) - padding</span>.<br/>
+  If <span class="mono">r</span> is too small, we retry with a new random center.
+</div>
 
 <script>
 (() => {
   const canvas = document.getElementById('c');
-  const ctx = canvas.getContext('2d', { alpha: false });
+  const ctx = canvas.getContext('2d', { alpha:false });
 
-  const COLOR1 = { fill: "rgba(70, 130, 255, 0.30)", stroke: "rgba(70, 130, 255, 0.75)" }; // blue
-  const COLOR2 = { fill: "rgba(255, 200, 60, 0.30)",  stroke: "rgba(255, 200, 60, 0.80)" }; // gold
+  // Single color
+  const C = { fill:"rgba(70,130,255,0.22)", stroke:"rgba(70,130,255,0.85)" };
 
   let holdStack = [];
 
-  const nextBtn  = document.getElementById('next');
-  const autoBtn  = document.getElementById('auto');
+  const nextBtn = document.getElementById('next');
   const resetBtn = document.getElementById('reset');
+  const padEl = document.getElementById('pad');
+  const padVal = document.getElementById('padVal');
+  const minrEl = document.getElementById('minr');
+  const minrVal = document.getElementById('minrVal');
+  const statsEl = document.getElementById('stats');
 
-  const speedEl  = document.getElementById('speed');
-  const speedVal = document.getElementById('speedVal');
-  const padEl    = document.getElementById('pad');
-  const padVal   = document.getElementById('padVal');
-  const statsEl  = document.getElementById('stats');
+  function rand(min, max){ return min + Math.random()*(max-min); }
+  function clamp(v,a,b){ return Math.max(a, Math.min(b,v)); }
 
-  let autoRunning = false;
-
-  function resize() {
+  function resize(){
     const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
-    canvas.width  = Math.floor(window.innerWidth * dpr);
+    canvas.width = Math.floor(window.innerWidth * dpr);
     canvas.height = Math.floor(window.innerHeight * dpr);
     canvas.style.width = window.innerWidth + "px";
     canvas.style.height = window.innerHeight + "px";
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
+    ctx.setTransform(dpr,0,0,dpr,0,0);
     clearCanvas();
     redrawAll();
   }
-  window.addEventListener('resize', resize, { passive: true });
+  window.addEventListener('resize', resize, {passive:true});
 
-  function clearCanvas() {
-    ctx.fillStyle = "#0b0f14";
-    ctx.fillRect(0, 0, window.innerWidth, window.innerHeight);
+  function clearCanvas(){
+    ctx.fillStyle="#0b0f14";
+    ctx.fillRect(0,0,window.innerWidth, window.innerHeight);
   }
 
-  function drawCircle(c) {
-    const palette = (c.color === 1) ? COLOR1 : COLOR2;
-
+  function drawCircle(c){
     ctx.beginPath();
-    ctx.arc(c.x, c.y, c.r, 0, Math.PI * 2);
+    ctx.arc(c.x,c.y,c.r,0,Math.PI*2);
     ctx.closePath();
-
-    ctx.fillStyle = palette.fill;
+    ctx.fillStyle = C.fill;
     ctx.fill();
-
     ctx.lineWidth = 1.25;
-    ctx.strokeStyle = palette.stroke;
+    ctx.strokeStyle = C.stroke;
     ctx.stroke();
   }
 
-  function redrawAll() {
+  function redrawAll(){
     for (const c of holdStack) drawCircle(c);
   }
 
-  function rand(min, max) { return min + Math.random() * (max - min); }
-  function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
-
-  function init() {
+  function init(){
     holdStack = [];
     clearCanvas();
 
+    // Start with one random circle
     const w = window.innerWidth, h = window.innerHeight;
-    const r0 = rand(Math.min(w, h) * 0.06, Math.min(w, h) * 0.18);
+    const r0 = rand(Math.min(w,h)*0.08, Math.min(w,h)*0.18);
     const c0 = {
-      x: rand(r0, w - r0),
-      y: rand(r0, h - r0),
-      r: r0,
-      color: 1
+      x: rand(r0, w-r0),
+      y: rand(r0, h-r0),
+      r: r0
     };
     holdStack.push(c0);
     drawCircle(c0);
     statsEl.textContent = `N=${holdStack.length}`;
   }
 
-  function closestCircleToPoint(x, y) {
-    let best = null;
-    let bestD = Infinity;
-    for (const c of holdStack) {
+  // Compute maximum allowed radius at (x,y) so circle stays outside all existing circles.
+  function allowedRadiusAt(x, y, padding){
+    let r = Infinity;
+    for (const c of holdStack){
       const d = Math.hypot(x - c.x, y - c.y);
-      if (d < bestD) { bestD = d; best = c; }
+      r = Math.min(r, d - c.r);
     }
-    return { circle: best, dm: bestD };
+    return r - padding; // enforce a gap
   }
 
-  function stepOnce() {
+  function stepOnce(){
     const w = window.innerWidth, h = window.innerHeight;
     const padding = parseFloat(padEl.value) || 0;
+    const rMin = parseFloat(minrEl.value) || 2;
+    const rMax = Math.min(w,h) * 0.45;
 
-    const x = rand(0, w);
-    const y = rand(0, h);
+    // Try a bunch of random centers until we find one that yields a decent radius
+    const MAX_TRIES = 800;
+    for (let t=0; t<MAX_TRIES; t++){
+      // pick a center with generous margin so we can keep it on-screen after radius is known
+      const x = rand(0, w);
+      const y = rand(0, h);
 
-    const { circle: cMin, dm } = closestCircleToPoint(x, y);
-    if (!cMin) return;
+      let r = allowedRadiusAt(x, y, padding);
+      if (!isFinite(r)) continue;
+      r = clamp(r, 0, rMax);
 
-    const rm = cMin.r;
-    let rNew = Math.abs(dm - rm) + padding;
+      if (r < rMin) continue;
 
-    const rMin = 2.0;
-    const rMax = Math.min(w, h) * 0.45;
-    rNew = clamp(rNew, rMin, rMax);
+      // keep on-screen by clamping center after radius known
+      const xc = clamp(x, r, w - r);
+      const yc = clamp(y, r, h - r);
 
-    const inside = (dm < rm);
-    const colorNew = inside ? (cMin.color === 1 ? 2 : 1) : cMin.color;
+      // Re-check after clamping (center changed slightly)
+      r = allowedRadiusAt(xc, yc, padding);
+      r = clamp(r, 0, rMax);
+      if (r < rMin) continue;
 
-    const xClamped = clamp(x, rNew, w - rNew);
-    const yClamped = clamp(y, rNew, h - rNew);
-
-    const cNew = { x: xClamped, y: yClamped, r: rNew, color: colorNew };
-    holdStack.push(cNew);
-    drawCircle(cNew);
-
-    statsEl.textContent = `N=${holdStack.length}`;
-  }
-
-  // Optional auto-run loop (OFF by default)
-  let lastT = performance.now();
-  let acc = 0;
-  function loop(t) {
-    requestAnimationFrame(loop);
-
-    const dt = (t - lastT) / 1000;
-    lastT = t;
-
-    if (!autoRunning) return;
-
-    const rate = parseFloat(speedEl.value) || 1;
-    const stepInterval = 1 / Math.max(1, rate);
-
-    acc += dt;
-    acc = Math.min(acc, 0.25);
-
-    while (acc >= stepInterval) {
-      stepOnce();
-      acc -= stepInterval;
-      if (rate > 60) break;
+      const cNew = { x: xc, y: yc, r: r };
+      holdStack.push(cNew);
+      drawCircle(cNew);
+      statsEl.textContent = `N=${holdStack.length}`;
+      return;
     }
+
+    // If we failed, do nothing (means too crowded)
+    // You can hit Reset to start over.
   }
 
   nextBtn.addEventListener('click', () => stepOnce());
-
-  autoBtn.addEventListener('click', () => {
-    autoRunning = !autoRunning;
-    autoBtn.textContent = autoRunning ? "Auto: On" : "Auto: Off";
-  });
-
   resetBtn.addEventListener('click', () => init());
 
-  speedEl.addEventListener('input', () => speedVal.textContent = `${speedEl.value}/s`);
   padEl.addEventListener('input', () => padVal.textContent = `${padEl.value}`);
+  minrEl.addEventListener('input', () => minrVal.textContent = `${minrEl.value}`);
 
-  document.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
+  document.addEventListener('touchmove', (e)=>e.preventDefault(), {passive:false});
 
   resize();
-  speedVal.textContent = `${speedEl.value}/s`;
   padVal.textContent = `${padEl.value}`;
+  minrVal.textContent = `${minrEl.value}`;
   init();
-  requestAnimationFrame(loop);
 })();
 </script>
 </body>
