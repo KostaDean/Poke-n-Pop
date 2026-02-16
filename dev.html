@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
-<title>Circle Box Screensaver</title>
+<title>Circle Division Screensaver</title>
 <style>
   html, body { margin:0; padding:0; width:100%; height:100%; background:#0b0f14; overflow:hidden; }
   canvas { display:block; width:100vw; height:100vh; touch-action: none; }
@@ -15,10 +15,9 @@
     padding: 10px 12px; border-radius: 10px;
     backdrop-filter: blur(6px);
     user-select:none;
+    max-width: 320px;
   }
-  .ui button, .ui input {
-    font: inherit; color: inherit;
-  }
+  .ui button { font: inherit; color: inherit; }
   .ui button{
     border: 1px solid rgba(255,255,255,0.22);
     background: rgba(255,255,255,0.10);
@@ -28,37 +27,44 @@
   }
   .ui button:active{ transform: translateY(1px); }
   .row { display:flex; align-items:center; gap:10px; margin-top:8px; }
-  .row label { opacity:0.9; }
+  .row label { opacity:0.9; width: 64px; }
   .row input[type="range"]{ width: 160px; }
   .hint { opacity:0.75; font-size:12px; margin-top:8px; }
+  .small { opacity:0.75; font-size:12px; margin-top:6px; }
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
 
 <div class="ui" id="ui">
-  <div><b>Circle Box Screensaver</b></div>
+  <div><b>Circle Division Screensaver</b></div>
+  <div class="small">Rule: on collision, let L=max(a,b), S=min(a,b). L becomes ⌊L/S⌋ and remainder r=L mod S becomes a new circle (if r&gt;0).</div>
   <div class="row">
     <button id="resetBtn">Reset</button>
     <button id="toggleBtn">Pause</button>
   </div>
   <div class="row">
     <label>Circles</label>
-    <input id="count" type="range" min="5" max="120" step="1" value="35" />
-    <span id="countVal">35</span>
+    <input id="count" type="range" min="5" max="120" step="1" value="28" />
+    <span id="countVal">28</span>
   </div>
   <div class="row">
     <label>Speed</label>
-    <input id="speed" type="range" min="0.3" max="3.0" step="0.1" value="1.3" />
-    <span id="speedVal">1.3</span>
+    <input id="speed" type="range" min="0.3" max="3.0" step="0.1" value="1.2" />
+    <span id="speedVal">1.2</span>
   </div>
   <div class="row">
     <label>Radius</label>
-    <input id="radius" type="range" min="6" max="45" step="1" value="18" />
+    <input id="radius" type="range" min="8" max="45" step="1" value="18" />
     <span id="radiusVal">18</span>
   </div>
+  <div class="row">
+    <label>Max #</label>
+    <input id="maxNum" type="range" min="20" max="500" step="5" value="120" />
+    <span id="maxNumVal">120</span>
+  </div>
   <div class="hint">
-    Tap/click: toggle UI • Double-tap: reset • Drag slider to change live
+    Tap/click: toggle UI • Double-tap: reset
   </div>
 </div>
 
@@ -73,9 +79,12 @@
   const countEl = document.getElementById('count');
   const speedEl = document.getElementById('speed');
   const radiusEl = document.getElementById('radius');
+  const maxNumEl = document.getElementById('maxNum');
+
   const countVal = document.getElementById('countVal');
   const speedVal = document.getElementById('speedVal');
   const radiusVal = document.getElementById('radiusVal');
+  const maxNumVal = document.getElementById('maxNumVal');
 
   const state = {
     running: true,
@@ -83,39 +92,49 @@
     lastT: performance.now(),
     dpr: Math.max(1, Math.min(3, window.devicePixelRatio || 1)),
     bg: '#0b0f14',
+    maxCirclesHard: 180, // safety cap
   };
 
   function resize() {
     state.dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
-    const w = Math.floor(innerWidth * state.dpr);
-    const h = Math.floor(innerHeight * state.dpr);
-    canvas.width = w;
-    canvas.height = h;
+    canvas.width = Math.floor(innerWidth * state.dpr);
+    canvas.height = Math.floor(innerHeight * state.dpr);
   }
   window.addEventListener('resize', resize, { passive: true });
 
   function rand(min, max) { return min + Math.random() * (max - min); }
-  function clamp(x, a, b){ return Math.max(a, Math.min(b, x)); }
 
   function randColor() {
-    // bright-ish colors, not too pale
     const h = Math.floor(Math.random()*360);
     const s = 80 + Math.random()*15;
     const l = 55 + Math.random()*10;
     return `hsl(${h} ${s}% ${l}%)`;
   }
 
-  function makeCircle(i, R, baseSpeed) {
+  function pickNumber() {
+    const maxN = parseInt(maxNumEl.value, 10);
+    // favor smaller numbers a bit, but allow big ones:
+    const u = Math.random();
+    const n = Math.floor(2 + (maxN - 1) * (u*u)); // skew low
+    return Math.max(2, n);
+  }
+
+  function makeCircle(R, baseSpeed) {
     const w = canvas.width, h = canvas.height;
     const x = rand(R, w - R);
     const y = rand(R, h - R);
     const a = rand(0, Math.PI*2);
-    const sp = baseSpeed * rand(0.7, 1.3);
+    const sp = baseSpeed * rand(0.75, 1.25);
     const vx = Math.cos(a) * sp;
     const vy = Math.sin(a) * sp;
-    // mass proportional to area (R^2) so big circles push more
     const m = R*R;
-    return { x, y, vx, vy, r: R, m, color: randColor(), flash: 0 };
+    return {
+      x, y, vx, vy, r: R, m,
+      color: randColor(),
+      flash: 0,
+      n: pickNumber(),
+      lastMathAt: -1e9
+    };
   }
 
   function init() {
@@ -124,11 +143,11 @@
     const R = parseFloat(radiusEl.value) * state.dpr;
     const sp = parseFloat(speedEl.value) * state.dpr * 140; // px/sec baseline
     state.circles = [];
-    // place circles with gentle rejection sampling to reduce initial overlaps
-    const maxAttempts = 9000;
+
+    const maxAttempts = 12000;
     let attempts = 0;
     while (state.circles.length < n && attempts < maxAttempts) {
-      const c = makeCircle(state.circles.length, R, sp);
+      const c = makeCircle(R, sp);
       let ok = true;
       for (const o of state.circles) {
         const dx = c.x - o.x, dy = c.y - o.y;
@@ -138,12 +157,87 @@
       if (ok) state.circles.push(c);
       attempts++;
     }
-    // If we couldn't pack them all, still run with what we have
     countVal.textContent = state.circles.length;
   }
 
-  // Elastic collision resolution for circles
-  function resolveCollision(a, b) {
+  function spawnRemainderCircle(parent, other, remainder, nx, ny) {
+    if (remainder <= 0) return;
+    if (state.circles.length >= state.maxCirclesHard) return;
+
+    const baseR = parseFloat(radiusEl.value) * state.dpr;
+    // size remainder circle relative to parent size, but bounded
+    const rel = Math.sqrt(remainder / Math.max(2, parent.n + remainder));
+    const r = Math.max(6*state.dpr, Math.min(baseR * 0.95, baseR * (0.45 + 0.9*rel)));
+
+    const c = makeCircle(r, parseFloat(speedEl.value) * state.dpr * 140);
+    // place near collision point with slight offset along normal, avoid immediate overlap
+    const sep = (parent.r + r + 2*state.dpr);
+    c.x = parent.x + nx * sep;
+    c.y = parent.y + ny * sep;
+
+    // velocity: kick it away + a bit sideways so it doesn't re-collide instantly
+    const tangX = -ny, tangY = nx;
+    const kick = (Math.hypot(parent.vx, parent.vy) + Math.hypot(other.vx, other.vy)) * 0.35 + 80*state.dpr;
+    c.vx = parent.vx * 0.35 + nx * kick + tangX * kick * rand(-0.35, 0.35);
+    c.vy = parent.vy * 0.35 + ny * kick + tangY * kick * rand(-0.35, 0.35);
+
+    c.n = remainder;
+    c.color = parent.color; // inherit
+    c.flash = 1.0;
+    c.lastMathAt = performance.now() / 1000;
+
+    // keep within bounds
+    c.x = Math.max(c.r, Math.min(canvas.width - c.r, c.x));
+    c.y = Math.max(c.r, Math.min(canvas.height - c.r, c.y));
+
+    state.circles.push(c);
+    // UI count should reflect growth
+    countVal.textContent = state.circles.length;
+  }
+
+  // Applies your arithmetic rule once per collision event (with cooldown)
+  function applyDivisionRule(a, b, nx, ny, nowS) {
+    // cooldown to avoid repeated math while still overlapping
+    const cooldown = 0.20;
+    if ((nowS - a.lastMathAt) < cooldown || (nowS - b.lastMathAt) < cooldown) return;
+
+    const na = a.n | 0;
+    const nb = b.n | 0;
+    if (na < 2 || nb < 2) return;
+
+    // identify larger-number circle (L) and smaller-number circle (S)
+    let L = a, S = b;
+    if (nb > na) { L = b; S = a; }
+    if (L.n === S.n) return; // equal numbers: no action (keeps it stable)
+
+    const big = L.n, small = S.n;
+    // big divided by small
+    const q = Math.floor(big / small);
+    const r = big % small;
+
+    // update larger circle to quotient (at least 2 to keep rule meaningful)
+    L.n = Math.max(2, q);
+
+    // spawn remainder as new circle
+    if (r > 0) {
+      // normal should point from S to L; ensure that for consistent spawn direction
+      // If L is b and a was reference, flip nx,ny
+      let sx = nx, sy = ny;
+      // our nx,ny will be from a->b; if L===a then normal should be from b->a
+      if (L === a) { sx = -nx; sy = -ny; }
+      spawnRemainderCircle(L, S, r, sx, sy);
+    }
+
+    // mark math time
+    L.lastMathAt = nowS;
+    S.lastMathAt = nowS;
+
+    // flash both
+    L.flash = 1.0;
+    S.flash = 1.0;
+  }
+
+  function resolveCollision(a, b, nowS) {
     const dx = b.x - a.x;
     const dy = b.y - a.y;
     const dist2 = dx*dx + dy*dy;
@@ -155,7 +249,7 @@
       const nx = dx / dist;
       const ny = dy / dist;
 
-      // Separate overlap (positional correction)
+      // separate overlap
       const overlap = (minDist - dist);
       const totalMass = a.m + b.m;
       const corrA = overlap * (b.m / totalMass);
@@ -165,15 +259,15 @@
       b.x += nx * corrB;
       b.y += ny * corrB;
 
-      // Relative velocity along normal
+      // relative velocity along normal
       const rvx = b.vx - a.vx;
       const rvy = b.vy - a.vy;
       const velAlongNormal = rvx*nx + rvy*ny;
 
-      // If moving apart after correction, skip impulse
+      // If moving apart, skip impulse & math
       if (velAlongNormal > 0) return;
 
-      const restitution = 1.0; // 1.0 = perfectly elastic bounce
+      const restitution = 1.0;
       const j = -(1 + restitution) * velAlongNormal / (1/a.m + 1/b.m);
 
       const impX = j * nx;
@@ -184,13 +278,16 @@
       b.vx += impX / b.m;
       b.vy += impY / b.m;
 
-      // Flash effect
+      // flashes
       a.flash = 1.0;
       b.flash = 1.0;
+
+      // apply your rule once per “real” collision
+      applyDivisionRule(a, b, nx, ny, nowS);
     }
   }
 
-  function step(dt) {
+  function step(dt, nowS) {
     const w = canvas.width, h = canvas.height;
 
     for (const c of state.circles) {
@@ -203,51 +300,55 @@
       if (c.y - c.r < 0) { c.y = c.r; c.vy = Math.abs(c.vy); c.flash = 1.0; }
       if (c.y + c.r > h) { c.y = h - c.r; c.vy = -Math.abs(c.vy); c.flash = 1.0; }
 
-      // keep from going too slow due to numeric issues
-      const v2 = c.vx*c.vx + c.vy*c.vy;
-      if (v2 < 1e-6) {
-        const a = rand(0, Math.PI*2);
-        const sp = parseFloat(speedEl.value) * state.dpr * 140;
-        c.vx = Math.cos(a) * sp;
-        c.vy = Math.sin(a) * sp;
-      }
-
       // fade flash
       c.flash = Math.max(0, c.flash - dt * 2.4);
     }
 
-    // collisions (O(n^2) — fine up to ~120)
+    // collisions
     const arr = state.circles;
     for (let i = 0; i < arr.length; i++) {
       for (let j = i + 1; j < arr.length; j++) {
-        resolveCollision(arr[i], arr[j]);
+        resolveCollision(arr[i], arr[j], nowS);
       }
     }
   }
 
   function draw() {
-    // background
     ctx.fillStyle = state.bg;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // circles
+    // text style
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
     for (const c of state.circles) {
+      // fill
       ctx.beginPath();
       ctx.arc(c.x, c.y, c.r, 0, Math.PI*2);
-
       ctx.fillStyle = c.color;
       ctx.fill();
 
-      // subtle highlight ring
+      // stroke / flash ring
       if (c.flash > 0) {
         ctx.lineWidth = Math.max(2, 5 * state.dpr * c.flash);
         ctx.strokeStyle = `rgba(255,255,255,${0.55 * c.flash})`;
-        ctx.stroke();
       } else {
         ctx.lineWidth = Math.max(1, 1.5 * state.dpr);
         ctx.strokeStyle = 'rgba(255,255,255,0.12)';
-        ctx.stroke();
       }
+      ctx.stroke();
+
+      // number label (auto size)
+      const digits = String(c.n).length;
+      const fontPx = Math.max(10*state.dpr, Math.min(c.r * 0.95, (c.r * 1.25) / (0.7 + 0.22*digits)));
+      ctx.font = `${Math.floor(fontPx)}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif`;
+
+      // subtle shadow for readability
+      ctx.fillStyle = 'rgba(0,0,0,0.55)';
+      ctx.fillText(String(c.n), c.x + 1.2*state.dpr, c.y + 1.2*state.dpr);
+
+      ctx.fillStyle = 'rgba(255,255,255,0.92)';
+      ctx.fillText(String(c.n), c.x, c.y);
     }
 
     // border box
@@ -260,25 +361,27 @@
     const dt = Math.min(0.03, Math.max(0.0, (t - state.lastT) / 1000));
     state.lastT = t;
 
-    if (state.running) step(dt);
+    const nowS = t / 1000;
+    if (state.running) step(dt, nowS);
     draw();
-
     requestAnimationFrame(loop);
   }
 
-  // UI wiring
+  // UI
   function updateLabels() {
     countVal.textContent = countEl.value;
     speedVal.textContent = speedEl.value;
     radiusVal.textContent = radiusEl.value;
+    maxNumVal.textContent = maxNumEl.value;
   }
   updateLabels();
 
   countEl.addEventListener('input', () => { updateLabels(); init(); }, { passive: true });
   radiusEl.addEventListener('input', () => { updateLabels(); init(); }, { passive: true });
+  maxNumEl.addEventListener('input', () => { updateLabels(); init(); }, { passive: true });
+
   speedEl.addEventListener('input', () => {
     updateLabels();
-    // rescale velocities to new speed baseline
     const target = parseFloat(speedEl.value) * state.dpr * 140;
     for (const c of state.circles) {
       const v = Math.hypot(c.vx, c.vy) || 1;
@@ -294,25 +397,19 @@
     toggleBtn.textContent = state.running ? 'Pause' : 'Play';
   });
 
-  // Tap anywhere to toggle UI visibility (except when interacting with UI)
+  // Tap to toggle UI, double-tap to reset
   let lastTap = 0;
   function onPointerDown(e){
-    // ignore if tap is on UI
     if (e.target.closest && e.target.closest('#ui')) return;
-
     const now = Date.now();
     const isDouble = (now - lastTap) < 350;
     lastTap = now;
-
-    if (isDouble) {
-      init();
-    } else {
-      ui.style.display = (ui.style.display === 'none') ? 'block' : 'none';
-    }
+    if (isDouble) init();
+    else ui.style.display = (ui.style.display === 'none') ? 'block' : 'none';
   }
   window.addEventListener('pointerdown', onPointerDown, { passive: true });
 
-  // Kick off
+  // Start
   init();
   requestAnimationFrame(loop);
 })();
