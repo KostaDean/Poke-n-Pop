@@ -3,22 +3,22 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
-<title>Division Collisions (Quotient Splits Off)</title>
+<title>Musical Collision Circles</title>
 <style>
   html, body { margin:0; padding:0; width:100%; height:100%; background:#0b0f14; overflow:hidden; }
   canvas { display:block; width:100vw; height:100vh; touch-action: none; }
   .ui{
     position: fixed; left: 12px; top: 12px; z-index: 10;
-    font: 14px/1.2 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font: 14px/1.25 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     color: rgba(255,255,255,0.88);
-    background: rgba(0,0,0,0.35);
+    background: rgba(0,0,0,0.38);
     padding: 10px 12px; border-radius: 10px;
     backdrop-filter: blur(6px);
     user-select:none;
     max-width: 360px;
   }
   .row { display:flex; align-items:center; gap:10px; margin-top:8px; }
-  .row label{ width:80px; opacity:0.9; }
+  .row label{ width:86px; opacity:0.9; }
   .row input[type="range"]{ width: 170px; }
   .ui button{
     border: 1px solid rgba(255,255,255,0.22);
@@ -35,23 +35,22 @@
 <canvas id="c"></canvas>
 
 <div class="ui" id="ui">
-  <div><b>Division Collisions</b> <span style="opacity:.8">(radius ∝ √n)</span></div>
+  <div><b>Musical Collision Circles</b></div>
   <div class="hint">
-    New rule (prevents “everything → 2”): on collision, L=max(a,b), S=min(a,b). Compute q=⌊L/S⌋ and r=L mod S.
-    <br>• The <b>colliding larger</b> circle becomes <b>r</b> (remainder).
-    <br>• The <b>quotient q</b> splits off as a <b>new</b> circle (if q&gt;1).
-    <br>• Any circle with n≤1 disappears.
+    Numbers stay fixed. Every collision plays a tone: frequency from numbers, loudness from impact.
+    (On iPhone: first tap enables audio.)
   </div>
 
   <div class="row">
     <button id="resetBtn">Reset</button>
     <button id="toggleBtn">Pause</button>
+    <button id="muteBtn">Mute</button>
   </div>
 
   <div class="row">
     <label>Circles</label>
-    <input id="count" type="range" min="5" max="120" step="1" value="28" />
-    <span id="countVal">28</span>
+    <input id="count" type="range" min="5" max="140" step="1" value="34" />
+    <span id="countVal">34</span>
   </div>
 
   <div class="row">
@@ -62,17 +61,32 @@
 
   <div class="row">
     <label>Max #</label>
-    <input id="maxNum" type="range" min="20" max="800" step="10" value="180" />
-    <span id="maxNumVal">180</span>
+    <input id="maxNum" type="range" min="20" max="800" step="10" value="220" />
+    <span id="maxNumVal">220</span>
   </div>
 
   <div class="row">
     <label>Size k</label>
-    <input id="kSize" type="range" min="0.7" max="4.0" step="0.1" value="2.2" />
-    <span id="kSizeVal">2.2</span>
+    <input id="kSize" type="range" min="0.7" max="4.0" step="0.1" value="2.0" />
+    <span id="kSizeVal">2.0</span>
   </div>
 
-  <div class="hint">Tap/click background: toggle UI • Double-tap: reset</div>
+  <div class="row">
+    <label>Volume</label>
+    <input id="vol" type="range" min="0" max="1" step="0.01" value="0.45" />
+    <span id="volVal">0.45</span>
+  </div>
+
+  <div class="row">
+    <label>Scale</label>
+    <input id="scale" type="range" min="0" max="1" step="0.01" value="0.65" />
+    <span id="scaleVal">0.65</span>
+  </div>
+
+  <div class="hint">
+    Scale=0 → continuous frequencies • Scale=1 → snapped to musical notes
+    <br>Tap background: toggle UI • Double-tap: reset
+  </div>
 </div>
 
 <script>
@@ -83,15 +97,21 @@
   const ui = document.getElementById('ui');
   const resetBtn = document.getElementById('resetBtn');
   const toggleBtn = document.getElementById('toggleBtn');
+  const muteBtn = document.getElementById('muteBtn');
+
   const countEl = document.getElementById('count');
   const speedEl = document.getElementById('speed');
   const maxNumEl = document.getElementById('maxNum');
   const kSizeEl = document.getElementById('kSize');
+  const volEl = document.getElementById('vol');
+  const scaleEl = document.getElementById('scale');
 
   const countVal = document.getElementById('countVal');
   const speedVal = document.getElementById('speedVal');
   const maxNumVal = document.getElementById('maxNumVal');
   const kSizeVal = document.getElementById('kSizeVal');
+  const volVal = document.getElementById('volVal');
+  const scaleVal = document.getElementById('scaleVal');
 
   const state = {
     circles: [],
@@ -99,7 +119,14 @@
     lastT: performance.now(),
     dpr: Math.max(1, Math.min(3, window.devicePixelRatio || 1)),
     bg: '#0b0f14',
-    maxCirclesHard: 220
+    muted: false,
+    // audio
+    ac: null,
+    master: null,
+    audioReady: false,
+    // throttling
+    lastSoundT: 0,
+    soundMinGap: 0.018
   };
 
   function resize(){
@@ -107,9 +134,11 @@
     canvas.width = Math.floor(innerWidth * state.dpr);
     canvas.height = Math.floor(innerHeight * state.dpr);
   }
-  window.addEventListener('resize', resize, { passive: true });
+  window.addEventListener('resize', resize, { passive:true });
 
   function rand(min,max){ return min + Math.random()*(max-min); }
+  function clamp(x,a,b){ return Math.max(a, Math.min(b, x)); }
+
   function randColor(){
     const h = Math.floor(Math.random()*360);
     const s = 82 + Math.random()*12;
@@ -127,7 +156,7 @@
   function calcRadius(n){
     const k = parseFloat(kSizeEl.value);
     const minR = 7 * state.dpr;
-    const maxR = 52 * state.dpr;
+    const maxR = 58 * state.dpr;
     const r = minR + k * state.dpr * Math.sqrt(Math.max(0, n));
     return Math.max(minR, Math.min(maxR, r));
   }
@@ -144,7 +173,7 @@
       n: pickNumber(),
       color: randColor(),
       flash: 0,
-      lastMathAt: -1e9
+      lastCollideAt: -1e9
     };
     updatePhysical(c);
 
@@ -164,7 +193,7 @@
     const n = parseInt(countEl.value, 10);
     state.circles = [];
 
-    const maxAttempts = 14000;
+    const maxAttempts = 16000;
     let attempts = 0;
     while (state.circles.length < n && attempts < maxAttempts) {
       const c = makeCircle();
@@ -180,70 +209,88 @@
     countVal.textContent = state.circles.length;
   }
 
-  function spawnCircleFromValue(source, value, x, y, baseVx, baseVy, nx, ny){
-    if (value <= 1) return;
-    if (state.circles.length >= state.maxCirclesHard) return;
+  // --- AUDIO ---
+  function ensureAudio(){
+    if (state.audioReady) return;
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
 
-    const c = makeCircle();
-    c.n = value;
-    c.color = source.color;
-    updatePhysical(c);
-
-    // position and velocity
-    const sep = source.r + c.r + 3*state.dpr;
-    c.x = x + nx*sep;
-    c.y = y + ny*sep;
-
-    const tangX = -ny, tangY = nx;
-    const kick = (Math.hypot(baseVx, baseVy) * 0.6) + 90*state.dpr;
-    c.vx = baseVx*0.30 + nx*kick + tangX*kick*rand(-0.35,0.35);
-    c.vy = baseVy*0.30 + ny*kick + tangY*kick*rand(-0.35,0.35);
-
-    c.x = Math.max(c.r, Math.min(canvas.width - c.r, c.x));
-    c.y = Math.max(c.r, Math.min(canvas.height - c.r, c.y));
-    c.flash = 1.0;
-    c.lastMathAt = performance.now()/1000;
-
-    state.circles.push(c);
+    state.ac = new AC();
+    state.master = state.ac.createGain();
+    state.master.gain.value = state.muted ? 0 : parseFloat(volEl.value);
+    state.master.connect(state.ac.destination);
+    state.audioReady = true;
   }
 
-  function applyRule(a, b, nx, ny, nowS){
-    const cooldown = 0.20;
-    if ((nowS - a.lastMathAt) < cooldown || (nowS - b.lastMathAt) < cooldown) return;
-    if (a.n < 2 || b.n < 2) return;
+  function setMasterVolume(v){
+    if (!state.audioReady) return;
+    state.master.gain.setTargetAtTime(state.muted ? 0 : v, state.ac.currentTime, 0.02);
+  }
 
-    let L = a, S = b;
-    if (b.n > a.n) { L = b; S = a; }
-    if (L.n === S.n) return;
+  function numToFreq(n){
+    const minHz = 110;
+    const maxHz = 1760;
+    const maxN = parseInt(maxNumEl.value, 10);
 
-    const big = L.n, small = S.n;
-    const q = Math.floor(big / small);
-    const r = big % small;
+    const t = clamp((Math.log(n) - Math.log(2)) / (Math.log(maxN) - Math.log(2)), 0, 1);
+    let hz = minHz * Math.pow(maxHz/minHz, t);
 
-    // Larger becomes remainder r (can be 0 -> disappears)
-    L.n = r;
-    if (L.n <= 1) {
-      const idx = state.circles.indexOf(L);
-      if (idx !== -1) state.circles.splice(idx, 1);
-    } else {
-      updatePhysical(L);
+    const snap = parseFloat(scaleEl.value);
+    if (snap > 0) {
+      const midi = 69 + 12*Math.log2(hz/440);
+      const snapped = Math.round(midi);
+      const hzSnapped = 440 * Math.pow(2, (snapped - 69)/12);
+      hz = hz*(1-snap) + hzSnapped*snap;
     }
-
-    // Quotient splits off as new circle
-    // Ensure direction: normal points from a->b; choose away from S toward L
-    let sx = nx, sy = ny;
-    if (L === a) { sx = -nx; sy = -ny; }
-
-    spawnCircleFromValue(S, q, S.x, S.y, S.vx, S.vy, sx, sy);
-
-    a.lastMathAt = nowS;
-    b.lastMathAt = nowS;
-    a.flash = 1.0;
-    b.flash = 1.0;
-
-    countVal.textContent = state.circles.length;
+    return hz;
   }
 
+  function playCollisionTone(a, b, impact){
+    if (state.muted) return;
+    ensureAudio();
+    if (!state.audioReady) return;
+
+    const now = state.ac.currentTime;
+    if (now - state.lastSoundT < state.soundMinGap) return;
+    state.lastSoundT = now;
+
+    const f1 = numToFreq(a.n);
+    const f2 = numToFreq(b.n);
+    const freq = (f1 + f2) * 0.5;
+    const beat = Math.abs(f1 - f2);
+
+    const baseVol = parseFloat(volEl.value);
+    const amp = clamp(0.04 + 0.22 * impact, 0.03, 0.35) * baseVol;
+
+    const o1 = state.ac.createOscillator();
+    const o2 = state.ac.createOscillator();
+    o1.type = 'triangle';
+    o2.type = 'sine';
+    o1.frequency.value = freq;
+    o2.frequency.value = freq + clamp(beat, 0, 24);
+
+    const g = state.ac.createGain();
+    g.gain.setValueAtTime(0.0001, now);
+
+    const attack = 0.004;
+    const decay = 0.12 + 0.08*(1-clamp(impact,0,1));
+    g.gain.exponentialRampToValueAtTime(Math.max(0.0002, amp), now + attack);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + attack + decay);
+
+    const lp = state.ac.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = clamp(freq*3, 600, 6000);
+
+    o1.connect(g); o2.connect(g);
+    g.connect(lp);
+    lp.connect(state.master);
+
+    o1.start(now); o2.start(now);
+    const stopT = now + attack + decay + 0.02;
+    o1.stop(stopT); o2.stop(stopT);
+  }
+
+  // --- PHYSICS ---
   function resolveCollision(a, b, nowS){
     const dx = b.x - a.x;
     const dy = b.y - a.y;
@@ -256,17 +303,13 @@
       const nx = dx / dist;
       const ny = dy / dist;
 
-      // separate overlap
       const overlap = (minDist - dist);
       const totalMass = a.m + b.m;
       const corrA = overlap * (b.m / totalMass);
       const corrB = overlap * (a.m / totalMass);
-      a.x -= nx * corrA;
-      a.y -= ny * corrA;
-      b.x += nx * corrB;
-      b.y += ny * corrB;
+      a.x -= nx * corrA; a.y -= ny * corrA;
+      b.x += nx * corrB; b.y += ny * corrB;
 
-      // impulse
       const rvx = b.vx - a.vx;
       const rvy = b.vy - a.vy;
       const velAlongNormal = rvx*nx + rvy*ny;
@@ -277,23 +320,23 @@
       const impX = j * nx;
       const impY = j * ny;
 
-      a.vx -= impX / a.m;
-      a.vy -= impY / a.m;
-      b.vx += impX / b.m;
-      b.vy += impY / b.m;
+      a.vx -= impX / a.m; a.vy -= impY / a.m;
+      b.vx += impX / b.m; b.vy += impY / b.m;
 
-      a.flash = 1.0;
-      b.flash = 1.0;
+      a.flash = 1.0; b.flash = 1.0;
 
-      applyRule(a, b, nx, ny, nowS);
+      const cooldown = 0.12;
+      if ((nowS - a.lastCollideAt) > cooldown && (nowS - b.lastCollideAt) > cooldown) {
+        const impact = clamp(Math.abs(velAlongNormal) / (parseFloat(speedEl.value)*state.dpr*140*1.2), 0, 1);
+        playCollisionTone(a, b, impact);
+        a.lastCollideAt = nowS;
+        b.lastCollideAt = nowS;
+      }
     }
   }
 
   function step(dt, nowS){
     const w = canvas.width, h = canvas.height;
-
-    // cull any accidental n<=1
-    if (state.circles.length) state.circles = state.circles.filter(c => c.n > 1);
 
     for (const c of state.circles){
       c.x += c.vx * dt;
@@ -340,6 +383,7 @@
       const digits = String(c.n).length;
       const fontPx = Math.max(10*state.dpr, Math.min(c.r*0.95, (c.r*1.25)/(0.7+0.22*digits)));
       ctx.font = `${Math.floor(fontPx)}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif`;
+
       ctx.fillStyle = 'rgba(0,0,0,0.55)';
       ctx.fillText(String(c.n), c.x + 1.2*state.dpr, c.y + 1.2*state.dpr);
       ctx.fillStyle = 'rgba(255,255,255,0.92)';
@@ -361,11 +405,14 @@
     requestAnimationFrame(loop);
   }
 
+  // UI
   function updateLabels(){
     countVal.textContent = countEl.value;
     speedVal.textContent = speedEl.value;
     maxNumVal.textContent = maxNumEl.value;
     kSizeVal.textContent = kSizeEl.value;
+    volVal.textContent = volEl.value;
+    scaleVal.textContent = scaleEl.value;
   }
   updateLabels();
 
@@ -388,14 +435,29 @@
     }
   }, { passive:true });
 
+  volEl.addEventListener('input', () => { updateLabels(); setMasterVolume(parseFloat(volEl.value)); }, { passive:true });
+  scaleEl.addEventListener('input', () => { updateLabels(); }, { passive:true });
+
   resetBtn.addEventListener('click', init);
   toggleBtn.addEventListener('click', () => {
     state.running = !state.running;
     toggleBtn.textContent = state.running ? 'Pause' : 'Play';
   });
 
+  muteBtn.addEventListener('click', () => {
+    state.muted = !state.muted;
+    muteBtn.textContent = state.muted ? 'Unmute' : 'Mute';
+    setMasterVolume(parseFloat(volEl.value));
+  });
+
+  // First interaction unlocks audio on iOS; background tap toggles UI; double-tap resets.
   let lastTap = 0;
   window.addEventListener('pointerdown', (e) => {
+    if (!state.audioReady) {
+      ensureAudio();
+      if (state.ac && state.ac.state === 'suspended') state.ac.resume();
+    }
+
     if (e.target.closest && e.target.closest('#ui')) return;
     const now = Date.now();
     const isDouble = (now - lastTap) < 350;
@@ -404,6 +466,7 @@
     else ui.style.display = (ui.style.display === 'none') ? 'block' : 'none';
   }, { passive:true });
 
+  // Start
   init();
   requestAnimationFrame(loop);
 })();
