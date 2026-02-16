@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>HoldStack Circles (Inside/Outside Color Rule)</title>
+  <title>HoldStack Circles (Tap Next)</title>
   <style>
     html, body {
       margin: 0;
@@ -18,7 +18,6 @@
     }
     #c { display:block; width:100vw; height:100vh; }
 
-    /* Minimal overlay controls */
     #ui {
       position: fixed;
       left: 12px;
@@ -35,6 +34,7 @@
       -webkit-backdrop-filter: blur(8px);
       color: #e9eef6;
       box-sizing: border-box;
+      flex-wrap: wrap;
     }
     #ui button {
       border: 0;
@@ -44,11 +44,13 @@
       font-weight: 600;
       color: #e9eef6;
       background: rgba(255,255,255,0.10);
+      white-space: nowrap;
     }
     #ui button:active { transform: scale(0.98); }
     #ui label { font-size: 13px; opacity: 0.9; }
     #ui input[type="range"] { width: 140px; }
     #stats { margin-left: auto; font-size: 12px; opacity: 0.9; }
+
     #hint {
       position: fixed;
       left: 12px;
@@ -62,16 +64,18 @@
       color: #e9eef6;
       font-size: 12px;
       line-height: 1.25;
-      max-width: 70vw;
+      max-width: 78vw;
       box-sizing: border-box;
     }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
   </style>
 </head>
 <body>
   <canvas id="c"></canvas>
 
   <div id="ui">
-    <button id="toggle">Pause</button>
+    <button id="next">Next</button>
+    <button id="auto">Auto: Off</button>
     <button id="reset">Reset</button>
 
     <label>Speed</label>
@@ -86,8 +90,9 @@
   </div>
 
   <div id="hint">
-    Rule: pick random center → find closest circle by center distance (Dm). Let its radius be Rm.<br/>
-    New radius = |Dm − Rm| + padding. If Dm &lt; Rm (inside) → flip color; else keep same color.
+    Tap <b>Next</b> to create one circle at a time.<br/>
+    Rule: pick random center → find closest circle by center distance (<span class="mono">Dm</span>). Let its radius be <span class="mono">Rm</span>.<br/>
+    New radius = <span class="mono">|Dm − Rm| + padding</span>. If <span class="mono">Dm &lt; Rm</span> (inside) → flip color; else keep same color.
   </div>
 
 <script>
@@ -95,25 +100,23 @@
   const canvas = document.getElementById('c');
   const ctx = canvas.getContext('2d', { alpha: false });
 
-  // Two distinct fills (color1, color2) + subtle outlines
   const COLOR1 = { fill: "rgba(70, 130, 255, 0.30)", stroke: "rgba(70, 130, 255, 0.75)" }; // blue
   const COLOR2 = { fill: "rgba(255, 200, 60, 0.30)",  stroke: "rgba(255, 200, 60, 0.80)" }; // gold
 
-  // HoldStack: {x,y,r,color} where color is 1 or 2
   let holdStack = [];
 
-  // Controls
-  const toggleBtn = document.getElementById('toggle');
-  const resetBtn  = document.getElementById('reset');
-  const speedEl   = document.getElementById('speed');
-  const speedVal  = document.getElementById('speedVal');
-  const padEl     = document.getElementById('pad');
-  const padVal    = document.getElementById('padVal');
-  const statsEl   = document.getElementById('stats');
+  const nextBtn  = document.getElementById('next');
+  const autoBtn  = document.getElementById('auto');
+  const resetBtn = document.getElementById('reset');
 
-  let running = true;
+  const speedEl  = document.getElementById('speed');
+  const speedVal = document.getElementById('speedVal');
+  const padEl    = document.getElementById('pad');
+  const padVal   = document.getElementById('padVal');
+  const statsEl  = document.getElementById('stats');
 
-  // Resize handling
+  let autoRunning = false;
+
   function resize() {
     const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
     canvas.width  = Math.floor(window.innerWidth * dpr);
@@ -168,7 +171,6 @@
     };
     holdStack.push(c0);
     drawCircle(c0);
-
     statsEl.textContent = `N=${holdStack.length}`;
   }
 
@@ -193,10 +195,8 @@
     if (!cMin) return;
 
     const rm = cMin.r;
-
     let rNew = Math.abs(dm - rm) + padding;
 
-    // Keep sizes sensible
     const rMin = 2.0;
     const rMax = Math.min(w, h) * 0.45;
     rNew = clamp(rNew, rMin, rMax);
@@ -204,7 +204,6 @@
     const inside = (dm < rm);
     const colorNew = inside ? (cMin.color === 1 ? 2 : 1) : cMin.color;
 
-    // Keep circle mostly on-screen
     const xClamped = clamp(x, rNew, w - rNew);
     const yClamped = clamp(y, rNew, h - rNew);
 
@@ -215,23 +214,22 @@
     statsEl.textContent = `N=${holdStack.length}`;
   }
 
-  // Timing: "speed" circles per second
+  // Optional auto-run loop (OFF by default)
   let lastT = performance.now();
   let acc = 0;
-
   function loop(t) {
     requestAnimationFrame(loop);
 
     const dt = (t - lastT) / 1000;
     lastT = t;
 
-    if (!running) return;
+    if (!autoRunning) return;
 
     const rate = parseFloat(speedEl.value) || 1;
     const stepInterval = 1 / Math.max(1, rate);
 
     acc += dt;
-    acc = Math.min(acc, 0.25); // prevent catch-up bursts
+    acc = Math.min(acc, 0.25);
 
     while (acc >= stepInterval) {
       stepOnce();
@@ -240,26 +238,20 @@
     }
   }
 
-  // UI wiring
-  toggleBtn.addEventListener('click', () => {
-    running = !running;
-    toggleBtn.textContent = running ? "Pause" : "Play";
+  nextBtn.addEventListener('click', () => stepOnce());
+
+  autoBtn.addEventListener('click', () => {
+    autoRunning = !autoRunning;
+    autoBtn.textContent = autoRunning ? "Auto: On" : "Auto: Off";
   });
 
   resetBtn.addEventListener('click', () => init());
 
-  speedEl.addEventListener('input', () => {
-    speedVal.textContent = `${speedEl.value}/s`;
-  });
+  speedEl.addEventListener('input', () => speedVal.textContent = `${speedEl.value}/s`);
+  padEl.addEventListener('input', () => padVal.textContent = `${padEl.value}`);
 
-  padEl.addEventListener('input', () => {
-    padVal.textContent = `${padEl.value}`;
-  });
-
-  // Prevent iOS scroll/bounce
   document.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
 
-  // Start
   resize();
   speedVal.textContent = `${speedEl.value}/s`;
   padVal.textContent = `${padEl.value}`;
