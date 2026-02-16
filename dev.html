@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
-<title>Circle Division Screensaver (Size = √n)</title>
+<title>Division Collisions (Quotient Splits Off)</title>
 <style>
   html, body { margin:0; padding:0; width:100%; height:100%; background:#0b0f14; overflow:hidden; }
   canvas { display:block; width:100vw; height:100vh; touch-action: none; }
@@ -15,7 +15,7 @@
     padding: 10px 12px; border-radius: 10px;
     backdrop-filter: blur(6px);
     user-select:none;
-    max-width: 340px;
+    max-width: 360px;
   }
   .row { display:flex; align-items:center; gap:10px; margin-top:8px; }
   .row label{ width:80px; opacity:0.9; }
@@ -36,7 +36,12 @@
 
 <div class="ui" id="ui">
   <div><b>Division Collisions</b> <span style="opacity:.8">(radius ∝ √n)</span></div>
-  <div class="hint">On collision: L=max(a,b), S=min(a,b). L→⌊L/S⌋, remainder r=L mod S spawns new circle (if r&gt;1). If result ≤1, circle disappears.</div>
+  <div class="hint">
+    New rule (prevents “everything → 2”): on collision, L=max(a,b), S=min(a,b). Compute q=⌊L/S⌋ and r=L mod S.
+    <br>• The <b>colliding larger</b> circle becomes <b>r</b> (remainder).
+    <br>• The <b>quotient q</b> splits off as a <b>new</b> circle (if q&gt;1).
+    <br>• Any circle with n≤1 disappears.
+  </div>
 
   <div class="row">
     <button id="resetBtn">Reset</button>
@@ -94,7 +99,7 @@
     lastT: performance.now(),
     dpr: Math.max(1, Math.min(3, window.devicePixelRatio || 1)),
     bg: '#0b0f14',
-    maxCirclesHard: 200
+    maxCirclesHard: 220
   };
 
   function resize(){
@@ -105,7 +110,6 @@
   window.addEventListener('resize', resize, { passive: true });
 
   function rand(min,max){ return min + Math.random()*(max-min); }
-
   function randColor(){
     const h = Math.floor(Math.random()*360);
     const s = 82 + Math.random()*12;
@@ -130,7 +134,7 @@
 
   function updatePhysical(c){
     c.r = calcRadius(c.n);
-    c.m = c.r * c.r; // mass ∝ area
+    c.m = c.r * c.r;
   }
 
   function makeCircle(){
@@ -160,7 +164,6 @@
     const n = parseInt(countEl.value, 10);
     state.circles = [];
 
-    // Gentle packing
     const maxAttempts = 14000;
     let attempts = 0;
     while (state.circles.length < n && attempts < maxAttempts) {
@@ -177,41 +180,36 @@
     countVal.textContent = state.circles.length;
   }
 
-  function spawnRemainderCircle(parent, other, remainder, nx, ny){
-    if (remainder <= 1) return;
+  function spawnCircleFromValue(source, value, x, y, baseVx, baseVy, nx, ny){
+    if (value <= 1) return;
     if (state.circles.length >= state.maxCirclesHard) return;
 
     const c = makeCircle();
-    c.n = remainder;
-    c.color = parent.color;
+    c.n = value;
+    c.color = source.color;
     updatePhysical(c);
 
-    // place near collision point along normal
-    const sep = parent.r + c.r + 3*state.dpr;
-    c.x = parent.x + nx * sep;
-    c.y = parent.y + ny * sep;
+    // position and velocity
+    const sep = source.r + c.r + 3*state.dpr;
+    c.x = x + nx*sep;
+    c.y = y + ny*sep;
 
-    // kick away
     const tangX = -ny, tangY = nx;
-    const kick = (Math.hypot(parent.vx, parent.vy) + Math.hypot(other.vx, other.vy)) * 0.35 + 80*state.dpr;
-    c.vx = parent.vx * 0.35 + nx * kick + tangX * kick * rand(-0.35, 0.35);
-    c.vy = parent.vy * 0.35 + ny * kick + tangY * kick * rand(-0.35, 0.35);
+    const kick = (Math.hypot(baseVx, baseVy) * 0.6) + 90*state.dpr;
+    c.vx = baseVx*0.30 + nx*kick + tangX*kick*rand(-0.35,0.35);
+    c.vy = baseVy*0.30 + ny*kick + tangY*kick*rand(-0.35,0.35);
 
-    // keep in bounds
     c.x = Math.max(c.r, Math.min(canvas.width - c.r, c.x));
     c.y = Math.max(c.r, Math.min(canvas.height - c.r, c.y));
-
     c.flash = 1.0;
     c.lastMathAt = performance.now()/1000;
 
     state.circles.push(c);
-    countVal.textContent = state.circles.length;
   }
 
-  function applyDivisionRule(a, b, nx, ny, nowS){
+  function applyRule(a, b, nx, ny, nowS){
     const cooldown = 0.20;
     if ((nowS - a.lastMathAt) < cooldown || (nowS - b.lastMathAt) < cooldown) return;
-
     if (a.n < 2 || b.n < 2) return;
 
     let L = a, S = b;
@@ -222,8 +220,8 @@
     const q = Math.floor(big / small);
     const r = big % small;
 
-    // update larger circle to quotient; if 1 or 0 => disappear
-    L.n = q;
+    // Larger becomes remainder r (can be 0 -> disappears)
+    L.n = r;
     if (L.n <= 1) {
       const idx = state.circles.indexOf(L);
       if (idx !== -1) state.circles.splice(idx, 1);
@@ -231,18 +229,19 @@
       updatePhysical(L);
     }
 
-    // spawn remainder (if >1)
-    if (r > 1) {
-      let sx = nx, sy = ny;
-      if (L === a) { sx = -nx; sy = -ny; } // ensure normal points away from S toward L
-      spawnRemainderCircle(L, S, r, sx, sy);
-    }
+    // Quotient splits off as new circle
+    // Ensure direction: normal points from a->b; choose away from S toward L
+    let sx = nx, sy = ny;
+    if (L === a) { sx = -nx; sy = -ny; }
+
+    spawnCircleFromValue(S, q, S.x, S.y, S.vx, S.vy, sx, sy);
 
     a.lastMathAt = nowS;
     b.lastMathAt = nowS;
-
     a.flash = 1.0;
     b.flash = 1.0;
+
+    countVal.textContent = state.circles.length;
   }
 
   function resolveCollision(a, b, nowS){
@@ -267,7 +266,7 @@
       b.x += nx * corrB;
       b.y += ny * corrB;
 
-      // relative velocity
+      // impulse
       const rvx = b.vx - a.vx;
       const rvy = b.vy - a.vy;
       const velAlongNormal = rvx*nx + rvy*ny;
@@ -286,21 +285,20 @@
       a.flash = 1.0;
       b.flash = 1.0;
 
-      applyDivisionRule(a, b, nx, ny, nowS);
+      applyRule(a, b, nx, ny, nowS);
     }
   }
 
   function step(dt, nowS){
     const w = canvas.width, h = canvas.height;
 
-    // Cull any accidental n<=1
+    // cull any accidental n<=1
     if (state.circles.length) state.circles = state.circles.filter(c => c.n > 1);
 
     for (const c of state.circles){
       c.x += c.vx * dt;
       c.y += c.vy * dt;
 
-      // walls
       if (c.x - c.r < 0) { c.x = c.r; c.vx = Math.abs(c.vx); c.flash = 1.0; }
       if (c.x + c.r > w) { c.x = w - c.r; c.vx = -Math.abs(c.vx); c.flash = 1.0; }
       if (c.y - c.r < 0) { c.y = c.r; c.vy = Math.abs(c.vy); c.flash = 1.0; }
@@ -309,7 +307,6 @@
       c.flash = Math.max(0, c.flash - dt*2.4);
     }
 
-    // collisions
     const arr = state.circles;
     for (let i=0; i<arr.length; i++){
       for (let j=i+1; j<arr.length; j++){
@@ -340,11 +337,9 @@
       }
       ctx.stroke();
 
-      // number
       const digits = String(c.n).length;
       const fontPx = Math.max(10*state.dpr, Math.min(c.r*0.95, (c.r*1.25)/(0.7+0.22*digits)));
       ctx.font = `${Math.floor(fontPx)}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif`;
-
       ctx.fillStyle = 'rgba(0,0,0,0.55)';
       ctx.fillText(String(c.n), c.x + 1.2*state.dpr, c.y + 1.2*state.dpr);
       ctx.fillStyle = 'rgba(255,255,255,0.92)';
@@ -376,8 +371,9 @@
 
   countEl.addEventListener('input', () => { updateLabels(); init(); }, { passive:true });
   maxNumEl.addEventListener('input', () => { updateLabels(); init(); }, { passive:true });
-  kSizeEl.addEventListener('input', () => { updateLabels(); 
-    // rescale radii live
+
+  kSizeEl.addEventListener('input', () => {
+    updateLabels();
     for (const c of state.circles) updatePhysical(c);
   }, { passive:true });
 
@@ -398,7 +394,6 @@
     toggleBtn.textContent = state.running ? 'Pause' : 'Play';
   });
 
-  // Tap background to toggle UI, double-tap to reset
   let lastTap = 0;
   window.addEventListener('pointerdown', (e) => {
     if (e.target.closest && e.target.closest('#ui')) return;
