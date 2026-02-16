@@ -3,34 +3,46 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>HoldStack Circles (Manual + Continuous)</title>
+<title>Nested Circles (No Intersections)</title>
 <style>
-html, body{
-  margin:0; padding:0; height:100%;
-  overflow:hidden;
-  background:#0b0f14;
-  touch-action:none;
-  -webkit-user-select:none; user-select:none;
-  font-family:-apple-system, system-ui, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
-}
-#c{display:block; width:100vw; height:100vh;}
+  html, body{
+    margin:0; padding:0; height:100%;
+    overflow:hidden;
+    background:#0b0f14;
+    touch-action:none;
+    -webkit-user-select:none; user-select:none;
+    font-family:-apple-system, system-ui, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+  }
+  #c{display:block; width:100vw; height:100vh;}
 
-#ui{
-  position:fixed; left:12px; right:12px; top:12px; z-index:10;
-  display:flex; gap:10px; align-items:center; flex-wrap:wrap;
-  padding:10px 12px; border-radius:12px;
-  background:rgba(20,28,38,0.72);
-  backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px);
-  color:#e9eef6; box-sizing:border-box;
-}
-#ui button{
-  border:0; border-radius:10px; padding:10px 12px;
-  font-size:14px; font-weight:600; color:#e9eef6;
-  background:rgba(255,255,255,0.10);
-}
-#ui button:active{transform:scale(0.98);}
-#ui input[type="range"]{width:130px;}
-#stats{margin-left:auto; font-size:12px; opacity:0.9;}
+  #ui{
+    position:fixed; left:12px; right:12px; top:12px; z-index:10;
+    display:flex; gap:10px; align-items:center; flex-wrap:wrap;
+    padding:10px 12px; border-radius:12px;
+    background:rgba(20,28,38,0.72);
+    backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px);
+    color:#e9eef6; box-sizing:border-box;
+  }
+  #ui button{
+    border:0; border-radius:10px; padding:10px 12px;
+    font-size:14px; font-weight:600; color:#e9eef6;
+    background:rgba(255,255,255,0.10);
+    white-space:nowrap;
+  }
+  #ui button:active{transform:scale(0.98);}
+  #ui label{font-size:13px; opacity:0.9;}
+  #ui input[type="range"]{width:120px;}
+  #stats{margin-left:auto; font-size:12px; opacity:0.9;}
+
+  #hint{
+    position:fixed; left:12px; bottom:12px; z-index:10;
+    padding:10px 12px; border-radius:12px;
+    background:rgba(20,28,38,0.55);
+    backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px);
+    color:#e9eef6; font-size:12px; line-height:1.25;
+    max-width:90vw; box-sizing:border-box;
+  }
+  .mono{font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;}
 </style>
 </head>
 <body>
@@ -47,141 +59,220 @@ html, body{
   <span id="speedVal">10/s</span>
 
   <label>Padding</label>
-  <input id="pad" type="range" min="0" max="30" value="6" />
-  <span id="padVal">6</span>
+  <input id="pad" type="range" min="0" max="20" value="4" />
+  <span id="padVal">4</span>
+
+  <label>r min</label>
+  <input id="rmin" type="range" min="2" max="80" value="10" />
+  <span id="rminVal">10</span>
+
+  <label>r max</label>
+  <input id="rmax" type="range" min="10" max="260" value="130" />
+  <span id="rmaxVal">130</span>
 
   <div id="stats">N=0</div>
 </div>
 
+<div id="hint">
+  Allows circles to be <b>disjoint</b> OR <b>fully nested</b>, but forbids intersections.<br/>
+  Accept a new circle only if for every existing circle: <span class="mono">d ≥ r1+r2+pad</span> (separate) OR
+  <span class="mono">d ≤ |r1−r2|−pad</span> (one contains the other). Otherwise reject.<br/>
+  Color alternates by nesting depth: inside a parent → opposite color.
+</div>
+
 <script>
 (() => {
-const canvas = document.getElementById('c');
-const ctx = canvas.getContext('2d', {alpha:false});
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d', {alpha:false});
 
-const C = { fill:"rgba(70,130,255,0.22)", stroke:"rgba(70,130,255,0.85)" };
+  const COLOR1 = { fill:"rgba(70,130,255,0.22)", stroke:"rgba(70,130,255,0.88)" }; // blue
+  const COLOR2 = { fill:"rgba(255,200,60,0.22)", stroke:"rgba(255,200,60,0.88)" }; // gold
 
-let holdStack = [];
-let autoRunning = false;
+  // "HoldStack" entries: {x,y,r, parent, depth, color}
+  let holdStack = [];
+  let autoRunning = false;
 
-const nextBtn = document.getElementById('next');
-const autoBtn = document.getElementById('auto');
-const resetBtn = document.getElementById('reset');
-const speedEl = document.getElementById('speed');
-const speedVal = document.getElementById('speedVal');
-const padEl = document.getElementById('pad');
-const padVal = document.getElementById('padVal');
-const statsEl = document.getElementById('stats');
+  const nextBtn = document.getElementById('next');
+  const autoBtn = document.getElementById('auto');
+  const resetBtn = document.getElementById('reset');
 
-function rand(min,max){ return min + Math.random()*(max-min); }
+  const speedEl = document.getElementById('speed');
+  const speedVal = document.getElementById('speedVal');
 
-function resize(){
-  const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
-  canvas.width = Math.floor(window.innerWidth * dpr);
-  canvas.height = Math.floor(window.innerHeight * dpr);
-  canvas.style.width = window.innerWidth+"px";
-  canvas.style.height = window.innerHeight+"px";
-  ctx.setTransform(dpr,0,0,dpr,0,0);
-  clearCanvas(); redrawAll();
-}
-window.addEventListener('resize', resize);
+  const padEl = document.getElementById('pad');
+  const padVal = document.getElementById('padVal');
 
-function clearCanvas(){
-  ctx.fillStyle="#0b0f14";
-  ctx.fillRect(0,0,window.innerWidth,window.innerHeight);
-}
+  const rminEl = document.getElementById('rmin');
+  const rminVal = document.getElementById('rminVal');
 
-function drawCircle(c){
-  ctx.beginPath();
-  ctx.arc(c.x,c.y,c.r,0,Math.PI*2);
-  ctx.fillStyle=C.fill;
-  ctx.fill();
-  ctx.lineWidth=1.25;
-  ctx.strokeStyle=C.stroke;
-  ctx.stroke();
-}
+  const rmaxEl = document.getElementById('rmax');
+  const rmaxVal = document.getElementById('rmaxVal');
 
-function redrawAll(){ for(const c of holdStack) drawCircle(c); }
+  const statsEl = document.getElementById('stats');
 
-function fitsAll(cNew,padding){
-  for(const c of holdStack){
-    const d = Math.hypot(cNew.x-c.x,cNew.y-c.y);
-    if(d <= (cNew.r + c.r + padding)) return false;
+  function rand(min,max){ return min + Math.random()*(max-min); }
+  function clamp(v,a,b){ return Math.max(a, Math.min(b,v)); }
+
+  function resize(){
+    const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+    canvas.width = Math.floor(window.innerWidth * dpr);
+    canvas.height = Math.floor(window.innerHeight * dpr);
+    canvas.style.width = window.innerWidth+"px";
+    canvas.style.height = window.innerHeight+"px";
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    clearCanvas(); redrawAll();
   }
-  return true;
-}
+  window.addEventListener('resize', resize, {passive:true});
 
-function init(){
-  holdStack=[];
-  clearCanvas();
-  const w=window.innerWidth, h=window.innerHeight;
-  const r0 = rand(Math.min(w,h)*0.08, Math.min(w,h)*0.18);
-  const c0={ r:r0, x:rand(r0,w-r0), y:rand(r0,h-r0) };
-  holdStack.push(c0);
-  drawCircle(c0);
-  statsEl.textContent="N=1";
-}
+  function clearCanvas(){
+    ctx.fillStyle="#0b0f14";
+    ctx.fillRect(0,0,window.innerWidth, window.innerHeight);
+  }
 
-function attemptAdd(){
-  const w=window.innerWidth, h=window.innerHeight;
-  const padding=parseFloat(padEl.value)||0;
-  const MAX_TRIES=1500;
+  function drawCircle(c){
+    const pal = (c.color === 1) ? COLOR1 : COLOR2;
+    ctx.beginPath();
+    ctx.arc(c.x,c.y,c.r,0,Math.PI*2);
+    ctx.closePath();
+    ctx.fillStyle = pal.fill;
+    ctx.fill();
+    ctx.lineWidth = 1.25;
+    ctx.strokeStyle = pal.stroke;
+    ctx.stroke();
+  }
 
-  for(let i=0;i<MAX_TRIES;i++){
-    const r=rand(10,120);
-    const x=rand(r,w-r);
-    const y=rand(r,h-r);
-    const cNew={x,y,r};
-    if(fitsAll(cNew,padding)){
+  function redrawAll(){ for(const c of holdStack) drawCircle(c); }
+
+  // Returns true if the two circles are NOT intersecting (i.e. either disjoint or nested)
+  function pairIsValid(a, b, pad){
+    const d = Math.hypot(a.x - b.x, a.y - b.y);
+    const sum = a.r + b.r + pad;
+    const diff = Math.abs(a.r - b.r) - pad;
+    return (d >= sum) || (d <= diff);
+  }
+
+  // Determine smallest-radius parent that fully contains cNew (with padding).
+  // Condition for i contains new: d + rNew + pad <= r_i
+  function findParentIndex(cNew, pad){
+    let bestIdx = -1;
+    let bestR = Infinity;
+    for (let i=0; i<holdStack.length; i++){
+      const c = holdStack[i];
+      const d = Math.hypot(cNew.x - c.x, cNew.y - c.y);
+      if (d + cNew.r + pad <= c.r){
+        if (c.r < bestR){
+          bestR = c.r;
+          bestIdx = i;
+        }
+      }
+    }
+    return bestIdx;
+  }
+
+  function init(){
+    holdStack = [];
+    clearCanvas();
+
+    // Start with one random circle (depth 0 => color1)
+    const w = window.innerWidth, h = window.innerHeight;
+    const r0 = rand(Math.min(w,h)*0.12, Math.min(w,h)*0.22);
+    const c0 = { r:r0, x:rand(r0, w-r0), y:rand(r0, h-r0), parent:-1, depth:0, color:1 };
+    holdStack.push(c0);
+    drawCircle(c0);
+    statsEl.textContent = "N=1";
+  }
+
+  function attemptAdd(){
+    const w = window.innerWidth, h = window.innerHeight;
+    const pad = parseFloat(padEl.value) || 0;
+
+    let rMin = parseFloat(rminEl.value) || 2;
+    let rMax = parseFloat(rmaxEl.value) || 50;
+    if (rMax < rMin) [rMin, rMax] = [rMax, rMin];
+
+    // Rejection sampling: random center AND radius; accept only if it doesn't intersect ANY existing circle
+    const MAX_TRIES = 4000;
+    for (let t=0; t<MAX_TRIES; t++){
+      const r = rand(rMin, rMax);
+      const x = rand(r, w - r);
+      const y = rand(r, h - r);
+
+      const cNewBase = { x, y, r };
+
+      // Validate against all circles (no intersections)
+      let ok = true;
+      for (const c of holdStack){
+        if (!pairIsValid(cNewBase, c, pad)){
+          ok = false;
+          break;
+        }
+      }
+      if (!ok) continue;
+
+      // Parent/depth/color: smallest containing circle becomes parent
+      const parent = findParentIndex(cNewBase, pad);
+      const depth = (parent === -1) ? 0 : (holdStack[parent].depth + 1);
+      const color = (depth % 2 === 0) ? 1 : 2;
+
+      const cNew = { ...cNewBase, parent, depth, color };
       holdStack.push(cNew);
       drawCircle(cNew);
-      statsEl.textContent="N="+holdStack.length;
+      statsEl.textContent = "N=" + holdStack.length;
       return true;
     }
+    return false; // crowded or radii too strict
   }
-  return false;
-}
 
-// Manual
-nextBtn.onclick=()=>attemptAdd();
+  // Buttons
+  nextBtn.onclick = () => attemptAdd();
+  resetBtn.onclick = () => init();
+  autoBtn.onclick = () => {
+    autoRunning = !autoRunning;
+    autoBtn.textContent = autoRunning ? "Auto: On" : "Auto: Off";
+  };
 
-// Auto toggle
-autoBtn.onclick=()=>{
-  autoRunning=!autoRunning;
-  autoBtn.textContent=autoRunning?"Auto: On":"Auto: Off";
-};
+  // Sliders
+  speedEl.oninput = () => speedVal.textContent = speedEl.value + "/s";
+  padEl.oninput   = () => padVal.textContent = padEl.value;
+  rminEl.oninput  = () => rminVal.textContent = rminEl.value;
+  rmaxEl.oninput  = () => rmaxVal.textContent = rmaxEl.value;
 
-// Loop
-let last=performance.now();
-let acc=0;
+  // Auto loop
+  let last = performance.now();
+  let acc = 0;
+  function loop(t){
+    requestAnimationFrame(loop);
+    const dt = (t - last)/1000;
+    last = t;
 
-function loop(t){
+    if (!autoRunning) return;
+
+    const rate = parseFloat(speedEl.value) || 1;
+    const interval = 1 / Math.max(1, rate);
+
+    acc += dt;
+    acc = Math.min(acc, 0.25); // avoid huge catch-up bursts
+
+    while (acc >= interval){
+      attemptAdd();
+      acc -= interval;
+      if (rate > 30) break; // keep UI responsive on phones
+    }
+  }
+
+  // Prevent iOS bounce scroll
+  document.addEventListener('touchmove', (e)=>e.preventDefault(), {passive:false});
+
+  // Start
+  resize();
+  speedVal.textContent = speedEl.value + "/s";
+  padVal.textContent = padEl.value;
+  rminVal.textContent = rminEl.value;
+  rmaxVal.textContent = rmaxEl.value;
+  init();
   requestAnimationFrame(loop);
-  const dt=(t-last)/1000;
-  last=t;
-
-  if(!autoRunning) return;
-
-  const rate=parseFloat(speedEl.value)||1;
-  const interval=1/rate;
-
-  acc+=dt;
-  while(acc>=interval){
-    attemptAdd();
-    acc-=interval;
-  }
-}
-
-resetBtn.onclick=()=>init();
-
-speedEl.oninput=()=>speedVal.textContent=speedEl.value+"/s";
-padEl.oninput=()=>padVal.textContent=padEl.value;
-
-resize();
-speedVal.textContent=speedEl.value+"/s";
-padVal.textContent=padEl.value;
-init();
-requestAnimationFrame(loop);
 })();
 </script>
+
 </body>
 </html>
