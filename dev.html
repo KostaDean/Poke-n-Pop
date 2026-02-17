@@ -42,6 +42,12 @@ input[type=range]{width:170px}
     <input id="seedRate" type="range" min="0.2" max="5.0" step="0.1" value="1.2">
     <span id="seedOut">1.2</span>
   </div>
+
+  <div class="row">
+    <label>Add per hit</label>
+    <input id="addAmt" type="range" min="0" max="20" step="1" value="1">
+    <span id="addOut">1</span>
+  </div>
 </div>
 
 <script>
@@ -165,9 +171,12 @@ const minEl=document.getElementById("minCircles");
 const minOut=document.getElementById("minOut");
 const seedEl=document.getElementById("seedRate");
 const seedOut=document.getElementById("seedOut");
-function updUI(){ minOut.textContent=minEl.value; seedOut.textContent=seedEl.value; }
+const addEl=document.getElementById("addAmt");
+const addOut=document.getElementById("addOut");
+function updUI(){ minOut.textContent=minEl.value; seedOut.textContent=seedEl.value; addOut.textContent=addEl.value; }
 minEl.addEventListener("input",()=>{updUI();});
 seedEl.addEventListener("input",()=>{updUI();});
+addEl.addEventListener("input",()=>{updUI();});
 updUI();
 init();
 
@@ -239,8 +248,10 @@ function resolve(a,b,nowS){
   a.vx-=impX/a.m; a.vy-=impY/a.m;
   b.vx+=impX/b.m; b.vy+=impY/b.m;
 
-  // Growth +1 to BOTH
-  a.n+=1; b.n+=1;
+  // Growth +ADD to BOTH (slider-controlled)
+  const add = parseInt(addEl.value,10);
+  a.n += add;
+  b.n += add;
   updatePhysical(a); updatePhysical(b);
 
   const impact=Math.min(1,Math.abs(velAlong)/(280*dpr));
