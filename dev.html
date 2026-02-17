@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Collision Music</title>
+<title>Collision Music (Fixed Collisions)</title>
 <style>
 html,body{margin:0;height:100%;background:#0b0f14;overflow:hidden;font-family:-apple-system;}
 canvas{display:block}
@@ -12,132 +12,212 @@ canvas{display:block}
  color:#fff;padding:12px;border-radius:12px;backdrop-filter:blur(6px)
 }
 button{padding:8px 12px;border-radius:10px;border:1px solid #888;background:#222;color:#fff}
+.small{font-size:12px;opacity:.85;margin-top:6px}
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
 
 <div id="panel">
-<button id="startAudio">Start Sound</button>
-<button id="reset">Reset</button>
-<div style="font-size:12px;margin-top:6px">Tap "Start Sound" first (iPhone requirement)</div>
+  <button id="startAudio">Start Sound</button>
+  <button id="reset">Reset</button>
+  <button id="pause">Pause</button>
+  <div class="small">Tap “Start Sound” first (iPhone requirement). Collisions use elastic physics + overlap correction (no pass-through).</div>
 </div>
 
 <script>
 const canvas=document.getElementById("c");
-const ctx=canvas.getContext("2d");
+const ctx=canvas.getContext("2d",{alpha:false});
 let W,H,dpr;
+
 function resize(){
- dpr=window.devicePixelRatio||1;
- W=canvas.width=innerWidth*dpr;
- H=canvas.height=innerHeight*dpr;
+  dpr=window.devicePixelRatio||1;
+  canvas.width=Math.floor(innerWidth*dpr);
+  canvas.height=Math.floor(innerHeight*dpr);
+  W=canvas.width; H=canvas.height;
 }
-window.addEventListener("resize",resize);resize();
+window.addEventListener("resize",resize); resize();
 
-let ac=null, master=null;
+// --- AUDIO ---
+let ac=null, master=null, audioOn=false;
 function initAudio(){
- if(ac) return;
- ac=new (window.AudioContext||window.webkitAudioContext)();
- master=ac.createGain();
- master.gain.value=0.6;
- master.connect(ac.destination);
+  if(ac) return;
+  ac=new (window.AudioContext||window.webkitAudioContext)();
+  master=ac.createGain();
+  master.gain.value=0.6;
+  master.connect(ac.destination);
 
- const o=ac.createOscillator();
- const g=ac.createGain();
- o.type="sine";
- o.frequency.value=440;
- g.gain.value=0.2;
- o.connect(g); g.connect(master);
- o.start(); o.stop(ac.currentTime+0.15);
+  // confirmation beep
+  const o=ac.createOscillator();
+  const g=ac.createGain();
+  o.type="sine"; o.frequency.value=440;
+  g.gain.value=0.2;
+  o.connect(g); g.connect(master);
+  o.start(); o.stop(ac.currentTime+0.15);
 }
-document.getElementById("startAudio").onclick=()=>{
- initAudio();
- if(ac.state==="suspended") ac.resume();
+document.getElementById("startAudio").onclick=async ()=>{
+  initAudio();
+  if(ac.state==="suspended") await ac.resume();
+  audioOn=true;
 };
 
+function playSound(a,b,impact){
+  if(!audioOn || !ac) return;
+  const now=ac.currentTime;
+  const f=110+((a.n+b.n)%900);
+  const o1=ac.createOscillator();
+  const o2=ac.createOscillator();
+  const g=ac.createGain();
+  o1.type="triangle"; o2.type="sine";
+  o1.frequency.value=f;
+  o2.frequency.value=f*1.005;
+  const amp=Math.max(0.02, Math.min(0.35, 0.18*impact));
+  g.gain.setValueAtTime(0.0001,now);
+  g.gain.exponentialRampToValueAtTime(amp, now+0.01);
+  g.gain.exponentialRampToValueAtTime(0.0001, now+0.22);
+  o1.connect(g); o2.connect(g); g.connect(master);
+  o1.start(now); o2.start(now);
+  o1.stop(now+0.24); o2.stop(now+0.24);
+}
+
+// --- CIRCLES ---
 function rand(a,b){return a+Math.random()*(b-a)}
 function makeCircle(){
- let r=20*dpr;
- return{
-  x:rand(r,W-r),
-  y:rand(r,H-r),
-  vx:rand(-200,200),
-  vy:rand(-200,200),
-  r:r,
-  n:Math.floor(rand(10,300)),
-  flash:0
- };
+  const n=Math.floor(rand(10,300));
+  const r=(14 + Math.sqrt(n)*0.9)*dpr;
+  const speed=220*dpr;
+  const ang=rand(0,Math.PI*2);
+  return{
+    x:rand(r,W-r),
+    y:rand(r,H-r),
+    vx:Math.cos(ang)*speed*rand(0.7,1.2),
+    vy:Math.sin(ang)*speed*rand(0.7,1.2),
+    r:r,
+    m:r*r,
+    n:n,
+    lastHit:-1e9,
+    flash:0
+  };
 }
 
 let circles=[];
 function init(){
- circles=[];
- for(let i=0;i<30;i++) circles.push(makeCircle());
+  circles=[];
+  const target=30;
+  let attempts=0;
+  while(circles.length<target && attempts<12000){
+    const c=makeCircle();
+    let ok=true;
+    for(const o of circles){
+      const dx=c.x-o.x, dy=c.y-o.y;
+      const rr=c.r+o.r;
+      if(dx*dx+dy*dy < rr*rr*1.03){ ok=false; break; }
+    }
+    if(ok) circles.push(c);
+    attempts++;
+  }
 }
 document.getElementById("reset").onclick=init;
+
+let paused=false;
+document.getElementById("pause").onclick=()=>{
+  paused=!paused;
+  document.getElementById("pause").textContent=paused?"Play":"Pause";
+};
 init();
 
-function playSound(a,b,impact){
- if(!ac) return;
- const now=ac.currentTime;
- const f=110+((a.n+b.n)%600);
- const o=ac.createOscillator();
- const g=ac.createGain();
- o.type="triangle";
- o.frequency.value=f;
- g.gain.setValueAtTime(0.001,now);
- g.gain.exponentialRampToValueAtTime(0.3*impact,now+0.01);
- g.gain.exponentialRampToValueAtTime(0.001,now+0.25);
- o.connect(g); g.connect(master);
- o.start(now);
- o.stop(now+0.26);
+// Elastic collision + overlap correction
+function resolve(a,b,nowS){
+  const dx=b.x-a.x, dy=b.y-a.y;
+  const dist2=dx*dx+dy*dy;
+  const minDist=a.r+b.r;
+  if(dist2<=0 || dist2>=minDist*minDist) return;
+
+  const dist=Math.sqrt(dist2);
+  const nx=dx/dist, ny=dy/dist;
+
+  const overlap=minDist-dist;
+  const total=a.m+b.m;
+  const corrA=overlap*(b.m/total);
+  const corrB=overlap*(a.m/total);
+  a.x -= nx*corrA; a.y -= ny*corrA;
+  b.x += nx*corrB; b.y += ny*corrB;
+
+  const rvx=b.vx-a.vx, rvy=b.vy-a.vy;
+  const velAlong=rvx*nx + rvy*ny;
+  if(velAlong>0) return;
+
+  const restitution=1.0;
+  const j=-(1+restitution)*velAlong/(1/a.m + 1/b.m);
+  const impX=j*nx, impY=j*ny;
+
+  a.vx -= impX/a.m; a.vy -= impY/a.m;
+  b.vx += impX/b.m; b.vy += impY/b.m;
+
+  const cooldown=0.12;
+  if(nowS-a.lastHit>cooldown && nowS-b.lastHit>cooldown){
+    const impact=Math.min(1, Math.abs(velAlong)/(260*dpr));
+    playSound(a,b,impact);
+    a.lastHit=nowS; b.lastHit=nowS;
+  }
+
+  a.flash=1; b.flash=1;
 }
 
 let lastT=performance.now();
 function loop(t){
- const dt=Math.min(.03,(t-lastT)/1000);
- lastT=t;
+  const dt=Math.min(0.03, (t-lastT)/1000);
+  lastT=t;
+  const nowS=t/1000;
 
- ctx.fillStyle="#0b0f14";
- ctx.fillRect(0,0,W,H);
+  if(!paused){
+    const maxStep=0.010;
+    const steps=Math.max(1, Math.ceil(dt/maxStep));
+    const h=dt/steps;
 
- for(let c of circles){
-  c.x+=c.vx*dt*dpr;
-  c.y+=c.vy*dt*dpr;
+    for(let s=0;s<steps;s++){
+      for(const c of circles){
+        c.x += c.vx*h;
+        c.y += c.vy*h;
 
-  if(c.x-c.r<0||c.x+c.r>W) c.vx*=-1;
-  if(c.y-c.r<0||c.y+c.r>H) c.vy*=-1;
+        if(c.x-c.r<0){c.x=c.r; c.vx=Math.abs(c.vx); c.flash=1;}
+        if(c.x+c.r>W){c.x=W-c.r; c.vx=-Math.abs(c.vx); c.flash=1;}
+        if(c.y-c.r<0){c.y=c.r; c.vy=Math.abs(c.vy); c.flash=1;}
+        if(c.y+c.r>H){c.y=H-c.r; c.vy=-Math.abs(c.vy); c.flash=1;}
 
-  c.flash=Math.max(0,c.flash-dt*3);
- }
+        c.flash=Math.max(0, c.flash-h*3);
+      }
 
- for(let i=0;i<circles.length;i++){
-  for(let j=i+1;j<circles.length;j++){
-   let a=circles[i], b=circles[j];
-   let dx=b.x-a.x, dy=b.y-a.y;
-   let dist=Math.hypot(dx,dy);
-   if(dist<a.r+b.r){
-    let impact=Math.min(1,Math.abs(a.vx-b.vx)/400);
-    playSound(a,b,impact);
-    a.vx*=-1; b.vx*=-1;
-    a.flash=1; b.flash=1;
-   }
+      for(let i=0;i<circles.length;i++){
+        for(let j=i+1;j<circles.length;j++){
+          resolve(circles[i],circles[j],nowS);
+        }
+      }
+    }
   }
- }
 
- for(let c of circles){
-  ctx.beginPath();
-  ctx.arc(c.x,c.y,c.r,0,Math.PI*2);
-  ctx.fillStyle=`hsl(${c.n%360} 80% 60%)`;
-  ctx.fill();
-  ctx.fillStyle="#fff";
+  ctx.fillStyle="#0b0f14";
+  ctx.fillRect(0,0,W,H);
+
   ctx.textAlign="center";
   ctx.textBaseline="middle";
-  ctx.font=`${c.r*.8}px sans-serif`;
-  ctx.fillText(c.n,c.x,c.y);
- }
 
- requestAnimationFrame(loop);
+  for(const c of circles){
+    ctx.beginPath();
+    ctx.arc(c.x,c.y,c.r,0,Math.PI*2);
+    ctx.fillStyle=`hsl(${c.n%360} 80% 60%)`;
+    ctx.fill();
+
+    ctx.lineWidth = Math.max(1, 2*dpr*c.flash);
+    ctx.strokeStyle = c.flash>0 ? `rgba(255,255,255,${0.6*c.flash})` : "rgba(255,255,255,0.12)";
+    ctx.stroke();
+
+    ctx.fillStyle="#fff";
+    ctx.font=`${Math.max(12*dpr, c.r*0.7)}px sans-serif`;
+    ctx.fillText(c.n,c.x,c.y);
+  }
+
+  requestAnimationFrame(loop);
 }
 requestAnimationFrame(loop);
 </script>
