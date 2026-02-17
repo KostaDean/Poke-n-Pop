@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Collision Music + Division Remainders</title>
+<title>Collision Music + Division + Growth</title>
 <style>
 html,body{margin:0;height:100%;background:#0b0f14;overflow:hidden;font-family:-apple-system;}
 canvas{display:block}
@@ -26,8 +26,8 @@ button{padding:8px 12px;border-radius:10px;border:1px solid #888;background:#222
     <button id="pause">Pause</button>
   </div>
   <div class="small">
-    Rule on collision (after playing sound): let L=max(a,b), S=min(a,b). Compute q=⌊L/S⌋ and r=L mod S.
-    The larger-number circle becomes <b>q</b>. If q≤1 it disappears. If r&gt;1, remainder <b>r</b> spawns as a new circle.
+    On collision: BOTH circles gain +1. Then division rule:
+    larger → q = ⌊L/S⌋ (dies if ≤1), remainder r spawns new circle if r>1.
   </div>
 </div>
 
@@ -44,7 +44,7 @@ function resize(){
 }
 window.addEventListener("resize",resize); resize();
 
-// --- AUDIO ---
+// AUDIO
 let ac=null, master=null, audioOn=false;
 function initAudio(){
   if(ac) return;
@@ -52,8 +52,6 @@ function initAudio(){
   master=ac.createGain();
   master.gain.value=0.6;
   master.connect(ac.destination);
-
-  // confirmation beep
   const o=ac.createOscillator();
   const g=ac.createGain();
   o.type="sine"; o.frequency.value=440;
@@ -70,36 +68,26 @@ document.getElementById("startAudio").onclick=async ()=>{
 function playSound(a,b,impact){
   if(!audioOn || !ac) return;
   const now=ac.currentTime;
-  // Use numbers as pitch + slight detune for "beating"
-  const base = 110;
-  const f = base + ((a.n*3 + b.n*5) % 1200); // wider palette
-  const o1=ac.createOscillator();
-  const o2=ac.createOscillator();
+  const f=110+((a.n*3 + b.n*5) % 1500);
+  const o=ac.createOscillator();
   const g=ac.createGain();
-  o1.type="triangle"; o2.type="sine";
-  o1.frequency.value=f;
-  o2.frequency.value=f* (1.0 + Math.min(0.01, Math.abs(a.n-b.n)/8000));
-  const amp=Math.max(0.02, Math.min(0.35, 0.20*impact));
+  o.type="triangle";
+  o.frequency.value=f;
+  const amp=Math.max(0.02, Math.min(0.35, 0.22*impact));
   g.gain.setValueAtTime(0.0001,now);
   g.gain.exponentialRampToValueAtTime(amp, now+0.01);
   g.gain.exponentialRampToValueAtTime(0.0001, now+0.24);
-  o1.connect(g); o2.connect(g); g.connect(master);
-  o1.start(now); o2.start(now);
-  o1.stop(now+0.26); o2.stop(now+0.26);
+  o.connect(g); g.connect(master);
+  o.start(now); o.stop(now+0.26);
 }
 
-// --- CIRCLES ---
+// HELPERS
 function rand(a,b){return a+Math.random()*(b-a)}
 function clamp(x,a,b){return Math.max(a, Math.min(b, x));}
-
-const MAX_CIRCLES = 160;
+const MAX_CIRCLES=180;
 
 function radiusFromN(n){
-  // radius proportional to sqrt(n)
-  const minR = 10*dpr;
-  const maxR = 60*dpr;
-  const r = (14 + Math.sqrt(Math.max(0,n))*0.85)*dpr;
-  return clamp(r, minR, maxR);
+  return clamp((14 + Math.sqrt(n)*0.85)*dpr, 10*dpr, 60*dpr);
 }
 
 function makeCircle(n=null){
@@ -122,29 +110,16 @@ function makeCircle(n=null){
 }
 
 function updatePhysical(c){
-  c.r = radiusFromN(c.n);
-  c.m = c.r*c.r;
-  // keep inside bounds after resize/update
-  c.x = clamp(c.x, c.r, W-c.r);
-  c.y = clamp(c.y, c.r, H-c.r);
+  c.r=radiusFromN(c.n);
+  c.m=c.r*c.r;
+  c.x=clamp(c.x,c.r,W-c.r);
+  c.y=clamp(c.y,c.r,H-c.r);
 }
 
 let circles=[];
 function init(){
   circles=[];
-  const target=30;
-  let attempts=0;
-  while(circles.length<target && attempts<14000){
-    const c=makeCircle();
-    let ok=true;
-    for(const o of circles){
-      const dx=c.x-o.x, dy=c.y-o.y;
-      const rr=c.r+o.r;
-      if(dx*dx+dy*dy < rr*rr*1.03){ ok=false; break; }
-    }
-    if(ok) circles.push(c);
-    attempts++;
-  }
+  for(let i=0;i<30;i++) circles.push(makeCircle());
 }
 document.getElementById("reset").onclick=init;
 
@@ -155,98 +130,77 @@ document.getElementById("pause").onclick=()=>{
 };
 init();
 
-// Spawn remainder circle near collision point, with a kick
-function spawnRemainder(value, x, y, nx, ny, baseVx, baseVy){
-  if(value<=1) return;
-  if(circles.length>=MAX_CIRCLES) return;
-  const c = makeCircle(value);
-  // place slightly offset
-  const sep = c.r + 8*dpr;
-  c.x = clamp(x + nx*sep, c.r, W-c.r);
-  c.y = clamp(y + ny*sep, c.r, H-c.r);
-  // kick away a bit
-  const tangX = -ny, tangY = nx;
-  const kick = 140*dpr;
-  c.vx = baseVx*0.2 + nx*kick + tangX*kick*rand(-0.25,0.25);
-  c.vy = baseVy*0.2 + ny*kick + tangY*kick*rand(-0.25,0.25);
+function spawnRemainder(value,x,y,nx,ny,vx,vy){
+  if(value<=1||circles.length>=MAX_CIRCLES) return;
+  const c=makeCircle(value);
+  const sep=c.r+8*dpr;
+  c.x=clamp(x+nx*sep,c.r,W-c.r);
+  c.y=clamp(y+ny*sep,c.r,H-c.r);
+  c.vx=vx*0.2+nx*150*dpr;
+  c.vy=vy*0.2+ny*150*dpr;
   circles.push(c);
 }
 
-// Apply division rule (with cooldown so one collision doesn't apply repeatedly while overlapping)
 function applyDivision(a,b,nx,ny,nowS){
-  const cooldown = 0.18;
-  if(nowS-a.lastMath<cooldown || nowS-b.lastMath<cooldown) return;
-  if(a.n<2 || b.n<2) return;
+  const cooldown=0.18;
+  if(nowS-a.lastMath<cooldown||nowS-b.lastMath<cooldown) return;
 
-  let L=a, S=b;
-  if(b.n>a.n){ L=b; S=a; }
+  let L=a,S=b;
+  if(b.n>a.n){L=b;S=a;}
   if(L.n===S.n) return;
 
   const big=L.n, small=S.n;
   const q=Math.floor(big/small);
   const r=big%small;
 
-  // larger becomes quotient
-  L.n = q;
+  L.n=q;
   if(L.n<=1){
-    // remove
-    const idx = circles.indexOf(L);
-    if(idx!==-1) circles.splice(idx,1);
+    circles.splice(circles.indexOf(L),1);
   }else{
     updatePhysical(L);
   }
 
-  // spawn remainder
   if(r>1){
-    // normal direction should point away from S toward L
-    let sx=nx, sy=ny;
-    if(L===a){ sx=-nx; sy=-ny; }
-    spawnRemainder(r, S.x, S.y, sx, sy, S.vx, S.vy);
+    let sx=nx,sy=ny;
+    if(L===a){sx=-nx;sy=-ny;}
+    spawnRemainder(r,S.x,S.y,sx,sy,S.vx,S.vy);
   }
 
   a.lastMath=nowS; b.lastMath=nowS;
 }
 
-// Elastic collision + overlap correction
 function resolve(a,b,nowS){
   const dx=b.x-a.x, dy=b.y-a.y;
   const dist2=dx*dx+dy*dy;
   const minDist=a.r+b.r;
-  if(dist2<=0 || dist2>=minDist*minDist) return;
+  if(dist2<=0||dist2>=minDist*minDist) return;
 
   const dist=Math.sqrt(dist2);
   const nx=dx/dist, ny=dy/dist;
 
-  // positional correction
   const overlap=minDist-dist;
   const total=a.m+b.m;
-  const corrA=overlap*(b.m/total);
-  const corrB=overlap*(a.m/total);
-  a.x -= nx*corrA; a.y -= ny*corrA;
-  b.x += nx*corrB; b.y += ny*corrB;
+  a.x-=nx*(overlap*(b.m/total));
+  a.y-=ny*(overlap*(b.m/total));
+  b.x+=nx*(overlap*(a.m/total));
+  b.y+=ny*(overlap*(a.m/total));
 
-  // relative velocity
   const rvx=b.vx-a.vx, rvy=b.vy-a.vy;
-  const velAlong=rvx*nx + rvy*ny;
+  const velAlong=rvx*nx+rvy*ny;
   if(velAlong>0) return;
 
-  // impulse
-  const restitution=1.0;
-  const j=-(1+restitution)*velAlong/(1/a.m + 1/b.m);
+  const j=-(1+1.0)*velAlong/(1/a.m+1/b.m);
   const impX=j*nx, impY=j*ny;
+  a.vx-=impX/a.m; a.vy-=impY/a.m;
+  b.vx+=impX/b.m; b.vy+=impY/b.m;
 
-  a.vx -= impX/a.m; a.vy -= impY/a.m;
-  b.vx += impX/b.m; b.vy += impY/b.m;
+  // Growth rule: +1 to BOTH circles
+  a.n+=1; b.n+=1;
+  updatePhysical(a); updatePhysical(b);
 
-  // sound (per-circle cooldown)
-  const hitCooldown=0.10;
-  if(nowS-a.lastHit>hitCooldown && nowS-b.lastHit>hitCooldown){
-    const impact=Math.min(1, Math.abs(velAlong)/(280*dpr));
-    playSound(a,b,impact);
-    a.lastHit=nowS; b.lastHit=nowS;
-  }
+  const impact=Math.min(1,Math.abs(velAlong)/(280*dpr));
+  playSound(a,b,impact);
 
-  // math happens after sound (separately throttled)
   applyDivision(a,b,nx,ny,nowS);
 
   a.flash=1; b.flash=1;
@@ -254,30 +208,25 @@ function resolve(a,b,nowS){
 
 let lastT=performance.now();
 function loop(t){
-  const dt=Math.min(0.03, (t-lastT)/1000);
+  const dt=Math.min(0.03,(t-lastT)/1000);
   lastT=t;
   const nowS=t/1000;
 
   if(!paused){
-    // substeps to reduce tunneling
-    const maxStep=0.010;
-    const steps=Math.max(1, Math.ceil(dt/maxStep));
+    const steps=Math.max(1,Math.ceil(dt/0.01));
     const h=dt/steps;
-
     for(let s=0;s<steps;s++){
       for(const c of circles){
-        c.x += c.vx*h;
-        c.y += c.vy*h;
+        c.x+=c.vx*h;
+        c.y+=c.vy*h;
 
-        // walls
-        if(c.x-c.r<0){c.x=c.r; c.vx=Math.abs(c.vx); c.flash=1;}
-        if(c.x+c.r>W){c.x=W-c.r; c.vx=-Math.abs(c.vx); c.flash=1;}
-        if(c.y-c.r<0){c.y=c.r; c.vy=Math.abs(c.vy); c.flash=1;}
-        if(c.y+c.r>H){c.y=H-c.r; c.vy=-Math.abs(c.vy); c.flash=1;}
+        if(c.x-c.r<0){c.x=c.r;c.vx=Math.abs(c.vx);}
+        if(c.x+c.r>W){c.x=W-c.r;c.vx=-Math.abs(c.vx);}
+        if(c.y-c.r<0){c.y=c.r;c.vy=Math.abs(c.vy);}
+        if(c.y+c.r>H){c.y=H-c.r;c.vy=-Math.abs(c.vy);}
 
-        c.flash=Math.max(0, c.flash-h*3);
+        c.flash=Math.max(0,c.flash-h*3);
       }
-
       for(let i=0;i<circles.length;i++){
         for(let j=i+1;j<circles.length;j++){
           resolve(circles[i],circles[j],nowS);
@@ -286,10 +235,8 @@ function loop(t){
     }
   }
 
-  // draw
   ctx.fillStyle="#0b0f14";
   ctx.fillRect(0,0,W,H);
-
   ctx.textAlign="center";
   ctx.textBaseline="middle";
 
@@ -298,13 +245,8 @@ function loop(t){
     ctx.arc(c.x,c.y,c.r,0,Math.PI*2);
     ctx.fillStyle=`hsl(${c.n%360} 80% 60%)`;
     ctx.fill();
-
-    ctx.lineWidth = Math.max(1, 2*dpr*c.flash);
-    ctx.strokeStyle = c.flash>0 ? `rgba(255,255,255,${0.6*c.flash})` : "rgba(255,255,255,0.12)";
-    ctx.stroke();
-
     ctx.fillStyle="#fff";
-    ctx.font=`${Math.max(12*dpr, c.r*0.7)}px sans-serif`;
+    ctx.font=`${Math.max(12*dpr,c.r*0.7)}px sans-serif`;
     ctx.fillText(c.n,c.x,c.y);
   }
 
