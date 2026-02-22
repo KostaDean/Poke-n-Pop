@@ -180,6 +180,20 @@ addEl.addEventListener("input",()=>{updUI();});
 updUI();
 init();
 
+// Tap/click anywhere outside the panel to show/hide the panel (iOS-safe)
+const panelEl = document.getElementById("panel");
+function togglePanelIfOutside(e){
+  // If the tap started inside the panel (buttons/sliders), do nothing
+  const t = e.target;
+  if (t && t.closest && t.closest("#panel")) return;
+  panelEl.style.display = (panelEl.style.display === "none") ? "block" : "none";
+}
+// Use multiple event types for maximum mobile compatibility
+window.addEventListener("pointerdown", togglePanelIfOutside, { passive: true });
+window.addEventListener("touchstart", togglePanelIfOutside, { passive: true });
+window.addEventListener("click", togglePanelIfOutside, { passive: true });
+
+
 function spawnRemainder(value,x,y,nx,ny,vx,vy){
   if(value<=1||circles.length>=MAX_CIRCLES) return;
   const ok = spawnNew(value);
