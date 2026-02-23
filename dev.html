@@ -180,18 +180,35 @@ addEl.addEventListener("input",()=>{updUI();});
 updUI();
 init();
 
-// Tap/click anywhere outside the panel to show/hide the panel (iOS-safe)
+// Tap anywhere (even on the panel text/background) to show/hide the panel.
+// We DO NOT toggle when the user interacts with buttons/sliders.
+// iOS can fire multiple events (touchstart + click). We guard to avoid double-toggles.
 const panelEl = document.getElementById("panel");
-function togglePanelIfOutside(e){
-  // If the tap started inside the panel (buttons/sliders), do nothing
-  const t = e.target;
-  if (t && t.closest && t.closest("#panel")) return;
+let _lastToggleMS = 0;
+
+function shouldIgnoreToggleTarget(t){
+  if(!t) return false;
+  // If interacting with controls, don't toggle
+  if (t.closest && t.closest("button, input, select, textarea")) return true;
+  return false;
+}
+
+function togglePanel(e){
+  const now = Date.now();
+  if (now - _lastToggleMS < 350) return; // prevent double-toggle
+  _lastToggleMS = now;
+
+  if (shouldIgnoreToggleTarget(e.target)) return;
+
   panelEl.style.display = (panelEl.style.display === "none") ? "block" : "none";
 }
-// Use multiple event types for maximum mobile compatibility
-window.addEventListener("pointerdown", togglePanelIfOutside, { passive: true });
-window.addEventListener("touchstart", togglePanelIfOutside, { passive: true });
-window.addEventListener("click", togglePanelIfOutside, { passive: true });
+
+// Prefer pointer events when available; otherwise touchstart.
+if (window.PointerEvent) {
+  window.addEventListener("pointerdown", togglePanel, { passive: true });
+} else {
+  window.addEventListener("touchstart", togglePanel, { passive: true });
+}
 
 
 function spawnRemainder(value,x,y,nx,ny,vx,vy){
