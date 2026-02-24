@@ -249,17 +249,34 @@ init();
 // initialize overlay opacity from slider
 overlay.a = parseFloat(opacEl.value);
 
-// Tap anywhere (even on the panel text/background) to show/hide the panel.
-// We DO NOT toggle when the user interacts with buttons/sliders.
-// iOS can fire multiple events (touchstart + click). We guard to avoid double-toggles.
+// DOUBLE-TAP anywhere (outside sliders/buttons) to show/hide the panel.
+// Prevents accidental toggle while adjusting sliders.
 const panelEl = document.getElementById("panel");
-let _lastToggleMS = 0;
+let _lastTapTime = 0;
+const DOUBLE_TAP_DELAY = 320; // milliseconds
 
-function shouldIgnoreToggleTarget(t){
+function isControlTarget(t){
   if(!t) return false;
-  // If interacting with controls, don't toggle
-  if (t.closest && t.closest("button, input, select, textarea")) return true;
-  return false;
+  return !!(t.closest && t.closest("button, input, select, textarea"));
+}
+
+function handleTap(e){
+  if(isControlTarget(e.target)) return;
+
+  const now = Date.now();
+  if(now - _lastTapTime < DOUBLE_TAP_DELAY){
+    panelEl.style.display =
+      (panelEl.style.display === "none") ? "block" : "none";
+    _lastTapTime = 0;
+  } else {
+    _lastTapTime = now;
+  }
+}
+
+if (window.PointerEvent) {
+  window.addEventListener("pointerdown", handleTap, { passive: true });
+} else {
+  window.addEventListener("touchstart", handleTap, { passive: true });
 }
 
 function togglePanel(e){
