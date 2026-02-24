@@ -48,6 +48,12 @@ input[type=range]{width:170px}
     <input id="addAmt" type="range" min="0" max="20" step="1" value="1">
     <span id="addOut">1</span>
   </div>
+
+  <div class="row">
+    <label>Overlay</label>
+    <input id="opac" type="range" min="0" max="0.98" step="0.01" value="0.88">
+    <span id="opacOut">0.88</span>
+  </div>
 </div>
 
 <script>
@@ -213,12 +219,18 @@ const seedEl=document.getElementById("seedRate");
 const seedOut=document.getElementById("seedOut");
 const addEl=document.getElementById("addAmt");
 const addOut=document.getElementById("addOut");
-function updUI(){ minOut.textContent=minEl.value; seedOut.textContent=seedEl.value; addOut.textContent=addEl.value; }
+const opacEl=document.getElementById("opac");
+const opacOut=document.getElementById("opacOut");
+function updUI(){ minOut.textContent=minEl.value; seedOut.textContent=seedEl.value; addOut.textContent=addEl.value; opacOut.textContent=parseFloat(opacEl.value).toFixed(2); }
 minEl.addEventListener("input",()=>{updUI();});
 seedEl.addEventListener("input",()=>{updUI();});
 addEl.addEventListener("input",()=>{updUI();});
+opacEl.addEventListener("input",()=>{ overlay.a = parseFloat(opacEl.value); updUI(); });
 updUI();
 init();
+
+// initialize overlay opacity from slider
+overlay.a = parseFloat(opacEl.value);
 
 // Tap anywhere (even on the panel text/background) to show/hide the panel.
 // We DO NOT toggle when the user interacts with buttons/sliders.
