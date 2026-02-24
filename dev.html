@@ -24,7 +24,7 @@ input[type=range]{width:170px}
 
 <div id="panel">
   <div style="display:flex;gap:8px;flex-wrap:wrap">
-    <button id="startAudio">Start Sound</button>
+    <button id="startAudio">Sound On</button>
     <button id="reset">Reset</button>
     <button id="pause">Pause</button>
   </div>
@@ -42,15 +42,11 @@ input[type=range]{width:170px}
     <input id="seedRate" type="range" min="0.2" max="5.0" step="0.1" value="1.2">
     <span id="seedOut">1.2</span>
   </div>
-<div class="row">
-    <label>Overlay</label>
-    <input id="opac" type="range" min="0" max="0.98" step="0.01" value="0.88">
-    <span id="opacOut">0.88</span>
-  </div>
+
   <div class="row">
-    <label>Hue</label>
-    <input id="hue" type="range" min="0" max="360" step="1" value="200">
-    <span id="hueOut">200</span>
+    <label>Add per hit</label>
+    <input id="addAmt" type="range" min="0" max="20" step="1" value="1">
+    <span id="addOut">1</span>
   </div>
 </div>
 
@@ -82,10 +78,20 @@ function initAudio(){
   o.connect(g); g.connect(master);
   o.start(); o.stop(ac.currentTime+0.15);
 }
-document.getElementById("startAudio").onclick=async ()=>{
+const soundBtn = document.getElementById("startAudio");
+
+soundBtn.onclick = async ()=>{
   initAudio();
-  if(ac.state==="suspended") await ac.resume();
-  audioOn=true;
+
+  if(!audioOn){
+    if(ac.state==="suspended") await ac.resume();
+    audioOn = true;
+    soundBtn.textContent = "Sound Off";
+  } else {
+    if(ac && ac.state==="running") await ac.suspend();
+    audioOn = false;
+    soundBtn.textContent = "Sound On";
+  }
 };
 
 function playSound(a,b,impact){
@@ -110,16 +116,10 @@ function clamp(x,a,b){return Math.max(a, Math.min(b, x));}
 
 // ---- Pastel overlay (changes on every collision) ----
 const overlay = {
-  // current RGB
-  r: 40, g: 50, b: 65,
-  // target RGB (what we ease toward each frame)
-  tr: 40, tg: 50, tb: 65,
-  // BASE RGB set by hue slider (what we drift back to after flashes)
-  br: 40, bg: 50, bb: 65,
-  a: 0.88,      // opacity (slider-controlled)
-  lerp: 0.10,   // transition speed
-  // how strongly we drift back to base each frame (0..1)
-  basePull: 0.02
+  r: 40, g: 50, b: 65,      // current RGB
+  tr: 40, tg: 50, tb: 65,   // target RGB
+  a: 0.88,                  // opacity
+  lerp: 0.10                // transition speed
 };
 
 function hslToRgb(h, s, l){
@@ -141,28 +141,15 @@ function hslToRgb(h, s, l){
   };
 }
 
-function pickVividNearHue(baseHue){
-  // choose a bright, saturated color near the chosen hue
-  const h = (baseHue + (Math.random()*70 - 35) + 360) % 360;  // +/- 35°
-  const s = 0.78 + Math.random() * 0.18;  // high saturation
-  const l = 0.52 + Math.random() * 0.18;  // vivid lightness
+function pickPastel(){
+  const h = Math.random() * 360;
+  const s = 0.75 + Math.random() * 0.20;
+  const l = 0.55 + Math.random() * 0.15;
   return hslToRgb(h, s, l);
 }
 
-function setOverlayBaseFromHue(){
-  const baseHue = parseFloat(hueEl.value);
-  // base is softer than flash but still colorful
-  const base = hslToRgb(baseHue, 0.55, 0.62);
-  overlay.br = base.r; overlay.bg = base.g; overlay.bb = base.b;
-
-  // if no recent flash, gently steer target toward base too
-  overlay.tr = overlay.br; overlay.tg = overlay.bg; overlay.tb = overlay.bb;
-}
-
 function bumpOverlayColor(){
-  // flash color near the base hue
-  const baseHue = parseFloat(hueEl.value);
-  const c = pickVividNearHue(baseHue);
+  const c = pickPastel();
   overlay.tr = c.r; overlay.tg = c.g; overlay.tb = c.b;
 }
 
@@ -234,49 +221,26 @@ const minEl=document.getElementById("minCircles");
 const minOut=document.getElementById("minOut");
 const seedEl=document.getElementById("seedRate");
 const seedOut=document.getElementById("seedOut");
-const opacEl=document.getElementById("opac");
-const opacOut=document.getElementById("opacOut");
-const hueEl=document.getElementById("hue");
-const hueOut=document.getElementById("hueOut");
-function updUI(){ minOut.textContent=minEl.value; seedOut.textContent=seedEl.value; opacOut.textContent=parseFloat(opacEl.value).toFixed(2); hueOut.textContent=hueEl.value; }
+const addEl=document.getElementById("addAmt");
+const addOut=document.getElementById("addOut");
+function updUI(){ minOut.textContent=minEl.value; seedOut.textContent=seedEl.value; addOut.textContent=addEl.value; }
 minEl.addEventListener("input",()=>{updUI();});
 seedEl.addEventListener("input",()=>{updUI();});
-opacEl.addEventListener("input",()=>{ overlay.a = parseFloat(opacEl.value); updUI(); });
-hueEl.addEventListener("input",()=>{ setOverlayBaseFromHue(); updUI(); });
+addEl.addEventListener("input",()=>{updUI();});
 updUI();
 init();
 
-// initialize overlay opacity from slider
-overlay.a = parseFloat(opacEl.value);
-
-// DOUBLE-TAP anywhere (outside sliders/buttons) to show/hide the panel.
-// Prevents accidental toggle while adjusting sliders.
+// Tap anywhere (even on the panel text/background) to show/hide the panel.
+// We DO NOT toggle when the user interacts with buttons/sliders.
+// iOS can fire multiple events (touchstart + click). We guard to avoid double-toggles.
 const panelEl = document.getElementById("panel");
-let _lastTapTime = 0;
-const DOUBLE_TAP_DELAY = 320; // milliseconds
+let _lastToggleMS = 0;
 
-function isControlTarget(t){
+function shouldIgnoreToggleTarget(t){
   if(!t) return false;
-  return !!(t.closest && t.closest("button, input, select, textarea"));
-}
-
-function handleTap(e){
-  if(isControlTarget(e.target)) return;
-
-  const now = Date.now();
-  if(now - _lastTapTime < DOUBLE_TAP_DELAY){
-    panelEl.style.display =
-      (panelEl.style.display === "none") ? "block" : "none";
-    _lastTapTime = 0;
-  } else {
-    _lastTapTime = now;
-  }
-}
-
-if (window.PointerEvent) {
-  window.addEventListener("pointerdown", handleTap, { passive: true });
-} else {
-  window.addEventListener("touchstart", handleTap, { passive: true });
+  // If interacting with controls, don't toggle
+  if (t.closest && t.closest("button, input, select, textarea")) return true;
+  return false;
 }
 
 function togglePanel(e){
@@ -366,7 +330,7 @@ function resolve(a,b,nowS){
   b.vx+=impX/b.m; b.vy+=impY/b.m;
 
   // Growth +ADD to BOTH (slider-controlled)
-  const add = 1;
+  const add = parseInt(addEl.value,10);
   a.n += add;
   b.n += add;
   updatePhysical(a); updatePhysical(b);
@@ -422,12 +386,6 @@ function loop(t){
   ctx.fillStyle="#0b0f14";
   ctx.fillRect(0,0,W,H);
   // smooth transition of overlay color
-  // drift target back toward the base color (set by hue slider)
-  overlay.tr += (overlay.br - overlay.tr) * overlay.basePull;
-  overlay.tg += (overlay.bg - overlay.tg) * overlay.basePull;
-  overlay.tb += (overlay.bb - overlay.tb) * overlay.basePull;
-
-  // ease current color toward target
   overlay.r += (overlay.tr - overlay.r) * overlay.lerp;
   overlay.g += (overlay.tg - overlay.g) * overlay.lerp;
   overlay.b += (overlay.tb - overlay.b) * overlay.lerp;
