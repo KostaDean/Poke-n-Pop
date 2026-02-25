@@ -2,31 +2,35 @@
 <html>
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Collision Music + Division + Growth (Reseed)</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Number Collisions: Color Field + Sound Styles</title>
 <style>
-html,body{margin:0;height:100%;background:#0b0f14;overflow:hidden;font-family:-apple-system;}
-canvas{display:block}
+html,body{margin:0;height:100%;background:#0b0f14;overflow:hidden;font-family:-apple-system,system-ui;}
+canvas{display:block;touch-action:manipulation;}
 #panel{
- position:fixed;top:12px;left:12px;background:rgba(0,0,0,.5);
- color:#fff;padding:12px;border-radius:12px;backdrop-filter:blur(6px);
- max-width: 380px;
+ position:fixed;top:12px;left:12px;right:12px;
+ background:rgba(0,0,0,.55); color:#fff;
+ padding:12px;border-radius:14px;backdrop-filter:blur(8px);
+ max-width: 560px; margin:0 auto;
 }
-button{padding:8px 12px;border-radius:10px;border:1px solid #888;background:#222;color:#fff}
-select{padding:8px 10px;border-radius:10px;border:1px solid #888;background:#222;color:#fff}
-
-.small{font-size:12px;opacity:.85;margin-top:6px;line-height:1.25}
-.row{display:flex;gap:8px;align-items:center;margin-top:8px}
-label{font-size:12px;opacity:.85;width:90px}
-input[type=range]{width:170px}
+.controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+button,select{
+ padding:10px 14px;border-radius:12px;border:1px solid #888;
+ background:#222;color:#fff;font-size:16px;
+}
+.small{font-size:12px;opacity:.85;margin-top:8px;line-height:1.25}
+.row{display:flex;gap:10px;align-items:center;margin-top:10px}
+label{font-size:14px;opacity:.9;width:92px}
+input[type=range]{width:min(360px,55vw)}
+.val{min-width:60px;text-align:right;font-size:18px;opacity:.95}
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
 
 <div id="panel">
-  <div style="display:flex;gap:8px;flex-wrap:wrap">
-    <button id="startAudio">Sound On</button>
+  <div class="controls">
+    <button id="soundBtn">Sound On</button>
     <select id="soundStyle" title="Collision sound">
       <option value="synth">Synth</option>
       <option value="piano">Piano</option>
@@ -39,113 +43,274 @@ input[type=range]{width:170px}
     <button id="reset">Reset</button>
     <button id="pause">Pause</button>
   </div>
+
   <div class="small">
-    Collision: sound + both +1, then division (L→q, remainder r spawns).
-    <br><b>Auto-reseed:</b> keeps at least <span id="minVal">30</span> circles by spawning new ones.
-  </div>
-  <div class="row">
-    <label>Min circles</label>
-    <input id="minCircles" type="range" min="10" max="120" step="1" value="30">
-    <span id="minOut">30</span>
-  </div>
-  <div class="row">
-    <label>Seed rate</label>
-    <input id="seedRate" type="range" min="0.2" max="5.0" step="0.1" value="1.2">
-    <span id="seedOut">1.2</span>
+    Collision: sound + both +1, then division (L→q, remainder r spawns). Auto-reseed keeps population above minimum.
+    <br>Double‑tap anywhere to hide/show this panel (sliders/buttons still work).
   </div>
 
   <div class="row">
-    <label>Add per hit</label>
-    <input id="addAmt" type="range" min="0" max="20" step="1" value="1">
-    <span id="addOut">1</span>
+    <label>Min circles</label>
+    <input id="minCircles" type="range" min="10" max="140" step="1" value="30">
+    <div class="val" id="minOut">30</div>
+  </div>
+
+  <div class="row">
+    <label>Seed rate</label>
+    <input id="seedRate" type="range" min="0.2" max="6.0" step="0.1" value="1.2">
+    <div class="val" id="seedOut">1.2</div>
+  </div>
+
+  <div class="row">
+    <label>Overlay</label>
+    <input id="opac" type="range" min="0" max="0.98" step="0.01" value="0.88">
+    <div class="val" id="opacOut">0.88</div>
+  </div>
+
+  <div class="row">
+    <label>Hue</label>
+    <input id="hue" type="range" min="0" max="360" step="1" value="200">
+    <div class="val" id="hueOut">200</div>
   </div>
 </div>
 
 <script>
-const canvas=document.getElementById("c");
-const ctx=canvas.getContext("2d",{alpha:false});
-let W,H,dpr;
+/* ---------- canvas ---------- */
+const canvas = document.getElementById("c");
+const ctx = canvas.getContext("2d", {alpha:false});
+let W=0,H=0,dpr=1;
 
 function resize(){
-  dpr=window.devicePixelRatio||1;
-  canvas.width=Math.floor(innerWidth*dpr);
-  canvas.height=Math.floor(innerHeight*dpr);
-  W=canvas.width; H=canvas.height;
+  dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.floor(innerWidth * dpr);
+  canvas.height = Math.floor(innerHeight * dpr);
+  W = canvas.width; H = canvas.height;
 }
-window.addEventListener("resize",resize); resize();
+addEventListener("resize", resize);
+resize();
 
-// AUDIO
-let ac=null, master=null, audioOn=false;
-function initAudio(){
-  if(ac) return;
-  ac=new (window.AudioContext||window.webkitAudioContext)();
-  master=ac.createGain();
-  master.gain.value=0.6;
-  master.connect(ac.destination);
-  const o=ac.createOscillator();
-  const g=ac.createGain();
-  o.type="sine"; o.frequency.value=440;
-  g.gain.value=0.2;
-  o.connect(g); g.connect(master);
-  o.start(); o.stop(ac.currentTime+0.15);
-}
-document.getElementById("startAudio").onclick=async ()=>{
-  initAudio();
-  if(ac.state==="suspended") await ac.resume();
-  audioOn=true;
+function rand(a,b){ return a + Math.random()*(b-a); }
+function clamp(x,a,b){ return Math.max(a, Math.min(b,x)); }
+
+/* ---------- overlay color field ---------- */
+const overlay = {
+  r:40,g:50,b:65,
+  tr:40,tg:50,tb:65,
+  br:40,bg:50,bb:65,
+  a:0.88, lerp:0.12, basePull:0.02
 };
 
-function playSound(a,b,impact){
-  if(!audioOn || !ac) return;
-  const now=ac.currentTime;
-  const f=110+((a.n*3 + b.n*5) % 1500);
-  const o=ac.createOscillator();
-  const g=ac.createGain();
-  o.type="triangle";
-  o.frequency.value=f;
-  const amp=Math.max(0.02, Math.min(0.35, 0.22*impact));
-  g.gain.setValueAtTime(0.0001,now);
-  g.gain.exponentialRampToValueAtTime(amp, now+0.01);
-  g.gain.exponentialRampToValueAtTime(0.0001, now+0.24);
+function hslToRgb(h,s,l){
+  h=((h%360)+360)%360;
+  const c=(1-Math.abs(2*l-1))*s;
+  const x=c*(1-Math.abs(((h/60)%2)-1));
+  const m=l-c/2;
+  let r1=0,g1=0,b1=0;
+  if(h<60){r1=c;g1=x;}
+  else if(h<120){r1=x;g1=c;}
+  else if(h<180){g1=c;b1=x;}
+  else if(h<240){g1=x;b1=c;}
+  else if(h<300){r1=x;b1=c;}
+  else {r1=c;b1=x;}
+  return {r:Math.round((r1+m)*255),g:Math.round((g1+m)*255),b:Math.round((b1+m)*255)};
+}
+
+const hueEl = document.getElementById("hue");
+function setOverlayBaseFromHue(){
+  const baseHue = parseFloat(hueEl.value);
+  const base = hslToRgb(baseHue, 0.55, 0.62);
+  overlay.br=base.r; overlay.bg=base.g; overlay.bb=base.b;
+  overlay.tr=overlay.br; overlay.tg=overlay.bg; overlay.tb=overlay.bb;
+}
+
+function pickVividNearHue(baseHue){
+  const h = (baseHue + (Math.random()*70 - 35) + 360) % 360;
+  const s = 0.78 + Math.random()*0.18;
+  const l = 0.52 + Math.random()*0.18;
+  return hslToRgb(h,s,l);
+}
+
+function bumpOverlayColor(){
+  const baseHue = parseFloat(hueEl.value);
+  const c = pickVividNearHue(baseHue);
+  overlay.tr=c.r; overlay.tg=c.g; overlay.tb=c.b;
+}
+
+/* ---------- audio + sound styles ---------- */
+let ac=null, master=null, audioOn=false;
+let soundStyle="synth";
+const STORAGE_SOUND_STYLE="cm_sound_style";
+
+function ensureAudio(){
+  if(!ac){
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if(!AC) return null;
+    ac = new AC();
+    master = ac.createGain();
+    master.gain.value = 0.9;
+    master.connect(ac.destination);
+  }
+  return ac;
+}
+function envGain(g, now, peak, attack=0.008, release=0.18){
+  g.gain.setValueAtTime(0.0001, now);
+  g.gain.exponentialRampToValueAtTime(peak, now+attack);
+  g.gain.exponentialRampToValueAtTime(0.0001, now+Math.max(0.03, release));
+}
+function noiseBurst(ctx, now, dur, peak, hp=150, bp=900, q=6){
+  const len=Math.max(1, Math.floor(ctx.sampleRate*dur));
+  const buf=ctx.createBuffer(1,len,ctx.sampleRate);
+  const data=buf.getChannelData(0);
+  for(let i=0;i<len;i++) data[i]=(Math.random()*2-1);
+  const src=ctx.createBufferSource(); src.buffer=buf;
+
+  const hpf=ctx.createBiquadFilter(); hpf.type="highpass"; hpf.frequency.setValueAtTime(hp, now);
+  const bpf=ctx.createBiquadFilter(); bpf.type="bandpass"; bpf.frequency.setValueAtTime(bp, now); bpf.Q.setValueAtTime(q, now);
+
+  const g=ctx.createGain(); envGain(g, now, peak, 0.006, dur);
+
+  src.connect(hpf); hpf.connect(bpf); bpf.connect(g); g.connect(master);
+  src.start(now); src.stop(now+dur+0.02);
+}
+function playSynth(ctx, now, freq, amp){
+  const o=ctx.createOscillator(); const g=ctx.createGain();
+  o.type="triangle"; o.frequency.setValueAtTime(freq, now);
+  envGain(g, now, 0.25*amp, 0.006, 0.16);
   o.connect(g); g.connect(master);
+  o.start(now); o.stop(now+0.20);
+}
+function playPiano(ctx, now, freq, amp){
+  const ratios=[1,1.2599,1.4983];
+  const lp=ctx.createBiquadFilter();
+  lp.type="lowpass"; lp.frequency.setValueAtTime(2600, now); lp.Q.setValueAtTime(0.7, now);
+  lp.connect(master);
+  ratios.forEach((r,i)=>{
+    const o=ctx.createOscillator(); const g=ctx.createGain();
+    o.type="triangle"; o.frequency.setValueAtTime(freq*r, now);
+    envGain(g, now, (0.20/(i+1))*amp, 0.006, 0.26);
+    o.connect(g); g.connect(lp);
+    o.start(now); o.stop(now+0.32);
+  });
+}
+function playBark(ctx, now, freq, amp){
+  noiseBurst(ctx, now, 0.10, 0.25*amp, 180, 950, 6);
+  const o=ctx.createOscillator(); const g=ctx.createGain();
+  o.type="sawtooth";
+  const f0=220+(freq%140);
+  o.frequency.setValueAtTime(f0, now);
+  o.frequency.exponentialRampToValueAtTime(f0*0.6, now+0.08);
+  envGain(g, now, 0.14*amp, 0.004, 0.11);
+  o.connect(g); g.connect(master);
+  o.start(now); o.stop(now+0.13);
+}
+function playMeow(ctx, now, freq, amp){
+  const o=ctx.createOscillator(); const g=ctx.createGain();
+  o.type="triangle";
+  const f1=380+(freq%260), f2=f1*1.8;
+  o.frequency.setValueAtTime(f1, now);
+  o.frequency.linearRampToValueAtTime(f2, now+0.08);
+  o.frequency.linearRampToValueAtTime(f1*0.85, now+0.18);
+
+  const lfo=ctx.createOscillator(); const lfoG=ctx.createGain();
+  lfo.frequency.value=7; lfoG.gain.value=10;
+  lfo.connect(lfoG); lfoG.connect(o.frequency);
+
+  envGain(g, now, 0.22*amp, 0.010, 0.24);
+  o.connect(g); g.connect(master);
+  lfo.start(now); lfo.stop(now+0.24);
   o.start(now); o.stop(now+0.26);
 }
+function playRoar(ctx, now, amp){
+  const dur=0.30;
+  const len=Math.max(1, Math.floor(ctx.sampleRate*dur));
+  const buf=ctx.createBuffer(1,len,ctx.sampleRate);
+  const data=buf.getChannelData(0);
+  for(let i=0;i<len;i++) data[i]= (i? (data[i-1] + (Math.random()*2-1)*0.08) : (Math.random()*2-1)*0.3);
+  const src=ctx.createBufferSource(); src.buffer=buf;
 
-// HELPERS
-function rand(a,b){return a+Math.random()*(b-a)}
-function clamp(x,a,b){return Math.max(a, Math.min(b, x));}
-const MAX_CIRCLES=220;
+  const bp=ctx.createBiquadFilter(); bp.type="bandpass";
+  bp.frequency.setValueAtTime(220, now);
+  bp.frequency.linearRampToValueAtTime(420, now+dur);
+  bp.Q.setValueAtTime(1.8, now);
 
-function radiusFromN(n){
-  return clamp((14 + Math.sqrt(n)*0.85)*dpr, 10*dpr, 60*dpr);
+  const g=ctx.createGain();
+  g.gain.setValueAtTime(0.0001, now);
+  g.gain.exponentialRampToValueAtTime(0.32*amp, now+0.05);
+  g.gain.exponentialRampToValueAtTime(0.0001, now+dur);
+
+  src.connect(bp); bp.connect(g); g.connect(master);
+  src.start(now); src.stop(now+dur+0.02);
 }
-function pickN(){ return Math.floor(rand(10, 320)); }
+function playLaugh(ctx, now, freq, amp){
+  const syllables=6, gap=0.07;
+  const base=220+(freq%220);
+  const form=ctx.createBiquadFilter();
+  form.type="bandpass"; form.frequency.setValueAtTime(900, now); form.Q.setValueAtTime(3.8, now);
+  form.connect(master);
+
+  for(let i=0;i<syllables;i++){
+    const t0=now+i*gap;
+    const o=ctx.createOscillator(); const g=ctx.createGain();
+    o.type="sawtooth";
+    const fStart=base*(1.15-i*0.02);
+    const fEnd=base*(0.78-i*0.015);
+    o.frequency.setValueAtTime(fStart, t0);
+    o.frequency.exponentialRampToValueAtTime(Math.max(80,fEnd), t0+0.06);
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.22*amp, t0+0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0+0.065);
+    o.connect(g); g.connect(form);
+    o.start(t0); o.stop(t0+0.075);
+
+    const dur=0.065;
+    const len=Math.max(1, Math.floor(ctx.sampleRate*dur));
+    const buf=ctx.createBuffer(1,len,ctx.sampleRate);
+    const d=buf.getChannelData(0);
+    for(let j=0;j<len;j++) d[j]=(Math.random()*2-1);
+    const ns=ctx.createBufferSource(); ns.buffer=buf;
+    const ng=ctx.createGain();
+    ng.gain.setValueAtTime(0.0001, t0);
+    ng.gain.exponentialRampToValueAtTime(0.12*amp, t0+0.008);
+    ng.gain.exponentialRampToValueAtTime(0.0001, t0+dur);
+    ns.connect(ng); ng.connect(form);
+    ns.start(t0); ns.stop(t0+dur+0.01);
+  }
+}
+function playHit(a,b,impact){
+  if(!audioOn) return;
+  const ctxA = ensureAudio(); if(!ctxA) return;
+  const now = ctxA.currentTime;
+  const nA=a.n||0, nB=b.n||0;
+  const amp=Math.min(1, 0.55 + (impact||0)*0.35);
+  const freq=140 + ((nA*3+nB*5)%60)*10;
+  switch(soundStyle){
+    case "piano": playPiano(ctxA, now, freq, amp); break;
+    case "laugh": playLaugh(ctxA, now, freq, amp); break;
+    case "bark":  playBark(ctxA, now, freq, amp); break;
+    case "meow":  playMeow(ctxA, now, freq, amp); break;
+    case "roar":  playRoar(ctxA, now, amp); break;
+    default:      playSynth(ctxA, now, freq, amp); break;
+  }
+}
+
+/* ---------- circles + division ecosystem ---------- */
+const MAX_CIRCLES=220;
+function radiusFromN(n){ return clamp((14 + Math.sqrt(n)*0.85)*dpr, 10*dpr, 60*dpr); }
+function pickN(){ return Math.floor(rand(10,320)); }
 
 function makeCircle(n=null){
   const nn = (n==null)? pickN() : n;
   const r = radiusFromN(nn);
   const speed=220*dpr;
   const ang=rand(0,Math.PI*2);
-  return{
-    x:rand(r,W-r),
-    y:rand(r,H-r),
-    vx:Math.cos(ang)*speed*rand(0.7,1.2),
-    vy:Math.sin(ang)*speed*rand(0.7,1.2),
-    r:r,
-    m:r*r,
-    n:nn,
-    lastMath:-1e9,
-    flash:0
-  };
+  return {x:rand(r,W-r), y:rand(r,H-r), vx:Math.cos(ang)*speed*rand(0.7,1.2),
+          vy:Math.sin(ang)*speed*rand(0.7,1.2), r, m:r*r, n:nn, lastMath:-1e9};
 }
 function updatePhysical(c){
-  c.r=radiusFromN(c.n);
-  c.m=c.r*c.r;
-  c.x=clamp(c.x,c.r,W-c.r);
-  c.y=clamp(c.y,c.r,H-c.r);
+  c.r=radiusFromN(c.n); c.m=c.r*c.r;
+  c.x=clamp(c.x,c.r,W-c.r); c.y=clamp(c.y,c.r,H-c.r);
 }
 
-// Non-overlapping-ish spawn with attempts
 let circles=[];
 function spawnNew(n=null){
   if(circles.length>=MAX_CIRCLES) return false;
@@ -163,38 +328,9 @@ function spawnNew(n=null){
   circles.push(makeCircle(n));
   return true;
 }
-
-function init(){
-  circles=[];
-  const target=parseInt(document.getElementById("minCircles").value,10);
-  for(let i=0;i<target;i++) spawnNew();
-}
-document.getElementById("reset").onclick=init;
-
-let paused=false;
-document.getElementById("pause").onclick=()=>{
-  paused=!paused;
-  document.getElementById("pause").textContent=paused?"Play":"Pause";
-};
-
-// UI sliders
-const minEl=document.getElementById("minCircles");
-const minOut=document.getElementById("minOut");
-const seedEl=document.getElementById("seedRate");
-const seedOut=document.getElementById("seedOut");
-const addEl=document.getElementById("addAmt");
-const addOut=document.getElementById("addOut");
-function updUI(){ minOut.textContent=minEl.value; seedOut.textContent=seedEl.value; addOut.textContent=addEl.value; }
-minEl.addEventListener("input",()=>{updUI();});
-seedEl.addEventListener("input",()=>{updUI();});
-addEl.addEventListener("input",()=>{updUI();});
-updUI();
-init();
-
 function spawnRemainder(value,x,y,nx,ny,vx,vy){
   if(value<=1||circles.length>=MAX_CIRCLES) return;
-  const ok = spawnNew(value);
-  if(!ok) return;
+  spawnNew(value);
   const c=circles[circles.length-1];
   const sep=c.r+8*dpr;
   c.x=clamp(x+nx*sep,c.r,W-c.r);
@@ -203,10 +339,9 @@ function spawnRemainder(value,x,y,nx,ny,vx,vy){
   c.vy=vy*0.2+ny*150*dpr;
 }
 
-// Division rule + cooldown
 function applyDivision(a,b,nx,ny,nowS){
   const cooldown=0.18;
-  if(nowS-a.lastMath<cooldown||nowS-b.lastMath<cooldown) return;
+  if(nowS-a.lastMath<cooldown || nowS-b.lastMath<cooldown) return;
 
   let L=a,S=b;
   if(b.n>a.n){L=b;S=a;}
@@ -223,17 +358,14 @@ function applyDivision(a,b,nx,ny,nowS){
   }else{
     updatePhysical(L);
   }
-
   if(r>1){
-    let sx=nx,sy=ny;
-    if(L===a){sx=-nx;sy=-ny;}
-    spawnRemainder(r,S.x,S.y,sx,sy,S.vx,S.vy);
+    let sx=nx, sy=ny;
+    if(L===a){sx=-nx; sy=-ny;}
+    spawnRemainder(r, S.x, S.y, sx, sy, S.vx, S.vy);
   }
-
   a.lastMath=nowS; b.lastMath=nowS;
 }
 
-// Elastic collision + overlap correction
 function resolve(a,b,nowS){
   const dx=b.x-a.x, dy=b.y-a.y;
   const dist2=dx*dx+dy*dy;
@@ -245,10 +377,8 @@ function resolve(a,b,nowS){
 
   const overlap=minDist-dist;
   const total=a.m+b.m;
-  a.x-=nx*(overlap*(b.m/total));
-  a.y-=ny*(overlap*(b.m/total));
-  b.x+=nx*(overlap*(a.m/total));
-  b.y+=ny*(overlap*(a.m/total));
+  a.x-=nx*(overlap*(b.m/total)); a.y-=ny*(overlap*(b.m/total));
+  b.x+=nx*(overlap*(a.m/total)); b.y+=ny*(overlap*(a.m/total));
 
   const rvx=b.vx-a.vx, rvy=b.vy-a.vy;
   const velAlong=rvx*nx+rvy*ny;
@@ -259,18 +389,107 @@ function resolve(a,b,nowS){
   a.vx-=impX/a.m; a.vy-=impY/a.m;
   b.vx+=impX/b.m; b.vy+=impY/b.m;
 
-  // Growth +ADD to BOTH (slider-controlled)
-  const add = parseInt(addEl.value,10);
-  a.n += add;
-  b.n += add;
+  // growth fixed at +1
+  a.n += 1; b.n += 1;
   updatePhysical(a); updatePhysical(b);
 
-  const impact=Math.min(1,Math.abs(velAlong)/(280*dpr));
-  playSound(a,b,impact);
+  const impact=Math.min(1, Math.abs(velAlong)/(280*dpr));
+  playHit(a,b,impact);
+  bumpOverlayColor();
 
   applyDivision(a,b,nx,ny,nowS);
 }
 
+/* ---------- UI ---------- */
+const minEl=document.getElementById("minCircles");
+const seedEl=document.getElementById("seedRate");
+const opacEl=document.getElementById("opac");
+const minOut=document.getElementById("minOut");
+const seedOut=document.getElementById("seedOut");
+const opacOut=document.getElementById("opacOut");
+const hueOut=document.getElementById("hueOut");
+const pauseBtn=document.getElementById("pause");
+const resetBtn=document.getElementById("reset");
+const soundBtn=document.getElementById("soundBtn");
+const styleSel=document.getElementById("soundStyle");
+const testBtn=document.getElementById("testSound");
+
+function updUI(){
+  minOut.textContent=minEl.value;
+  seedOut.textContent=seedEl.value;
+  opacOut.textContent=parseFloat(opacEl.value).toFixed(2);
+  hueOut.textContent=hueEl.value;
+}
+minEl.addEventListener("input", updUI);
+seedEl.addEventListener("input", updUI);
+opacEl.addEventListener("input", ()=>{ overlay.a=parseFloat(opacEl.value); updUI(); });
+hueEl.addEventListener("input", ()=>{ setOverlayBaseFromHue(); updUI(); });
+overlay.a=parseFloat(opacEl.value);
+setOverlayBaseFromHue();
+updUI();
+
+// sound style persistence
+try{
+  const savedStyle = localStorage.getItem(STORAGE_SOUND_STYLE);
+  if(savedStyle){ soundStyle=savedStyle; styleSel.value=savedStyle; }
+}catch(e){}
+styleSel.addEventListener("change", ()=>{
+  soundStyle=styleSel.value;
+  try{ localStorage.setItem(STORAGE_SOUND_STYLE, soundStyle); }catch(e){}
+});
+
+soundBtn.onclick = async ()=>{
+  const ctxA=ensureAudio();
+  if(!ctxA) return;
+  if(!audioOn){
+    if(ac && ac.state==="suspended") await ac.resume();
+    audioOn=true; soundBtn.textContent="Sound Off";
+  }else{
+    if(ac && ac.state==="running") await ac.suspend();
+    audioOn=false; soundBtn.textContent="Sound On";
+  }
+};
+
+testBtn.onclick = async ()=>{
+  const ctxA=ensureAudio();
+  if(!ctxA) return;
+  if(ac && ac.state==="suspended") await ac.resume();
+  audioOn=true; soundBtn.textContent="Sound Off";
+  playHit({n:123},{n:77},1.0);
+};
+
+let paused=false;
+pauseBtn.onclick=()=>{
+  paused=!paused;
+  pauseBtn.textContent = paused ? "Play" : "Pause";
+};
+
+function init(){
+  circles=[];
+  const target=parseInt(minEl.value,10);
+  for(let i=0;i<target;i++) spawnNew();
+}
+resetBtn.onclick=init;
+init();
+
+/* ---------- double-tap toggle panel ---------- */
+const panelEl=document.getElementById("panel");
+let lastTap=0;
+function isControlTarget(t){ return !!(t && t.closest && t.closest("#panel button, #panel input, #panel select, #panel textarea")); }
+function tapHandler(e){
+  if(isControlTarget(e.target)) return;
+  const now=Date.now();
+  if(now-lastTap<320){
+    panelEl.style.display = (panelEl.style.display==="none") ? "block" : "none";
+    lastTap=0;
+  }else{
+    lastTap=now;
+  }
+}
+if(window.PointerEvent) window.addEventListener("pointerdown", tapHandler, {passive:true});
+else window.addEventListener("touchstart", tapHandler, {passive:true});
+
+/* ---------- main loop ---------- */
 let lastT=performance.now();
 let seedAcc=0;
 
@@ -283,40 +502,41 @@ function loop(t){
     const steps=Math.max(1,Math.ceil(dt/0.01));
     const h=dt/steps;
     for(let s=0;s<steps;s++){
-      // auto-reseed toward minimum count
-      const minC = parseInt(minEl.value,10);
-      const rate = parseFloat(seedEl.value);
-      const deficit = Math.max(0, minC - circles.length);
-      seedAcc += h * deficit * rate;
-      while(seedAcc >= 1.0){
-        seedAcc -= 1.0;
-        spawnNew();
-      }
+      const minC=parseInt(minEl.value,10);
+      const rate=parseFloat(seedEl.value);
+      const deficit=Math.max(0, minC-circles.length);
+      seedAcc += h*deficit*rate;
+      while(seedAcc>=1.0){ seedAcc-=1.0; spawnNew(); }
 
       for(const c of circles){
-        c.x+=c.vx*h;
-        c.y+=c.vy*h;
-
+        c.x+=c.vx*h; c.y+=c.vy*h;
         if(c.x-c.r<0){c.x=c.r;c.vx=Math.abs(c.vx);}
         if(c.x+c.r>W){c.x=W-c.r;c.vx=-Math.abs(c.vx);}
         if(c.y-c.r<0){c.y=c.r;c.vy=Math.abs(c.vy);}
         if(c.y+c.r>H){c.y=H-c.r;c.vy=-Math.abs(c.vy);}
       }
-
       for(let i=0;i<circles.length;i++){
         for(let j=i+1;j<circles.length;j++){
-          resolve(circles[i],circles[j],nowS);
+          resolve(circles[i], circles[j], nowS);
         }
       }
     }
   }
 
-  // draw
   ctx.fillStyle="#0b0f14";
   ctx.fillRect(0,0,W,H);
+
+  // drift target back toward base, then ease current toward target
+  overlay.tr += (overlay.br - overlay.tr) * overlay.basePull;
+  overlay.tg += (overlay.bg - overlay.tg) * overlay.basePull;
+  overlay.tb += (overlay.bb - overlay.tb) * overlay.basePull;
+  overlay.r += (overlay.tr - overlay.r) * overlay.lerp;
+  overlay.g += (overlay.tg - overlay.g) * overlay.lerp;
+  overlay.b += (overlay.tb - overlay.b) * overlay.lerp;
+
+  // draw circles (under overlay)
   ctx.textAlign="center";
   ctx.textBaseline="middle";
-
   for(const c of circles){
     ctx.beginPath();
     ctx.arc(c.x,c.y,c.r,0,Math.PI*2);
@@ -327,51 +547,13 @@ function loop(t){
     ctx.fillText(c.n,c.x,c.y);
   }
 
+  // overlay on top
+  ctx.fillStyle = `rgba(${Math.round(overlay.r)},${Math.round(overlay.g)},${Math.round(overlay.b)},${overlay.a})`;
+  ctx.fillRect(0,0,W,H);
+
   requestAnimationFrame(loop);
 }
 requestAnimationFrame(loop);
-const startBtn = document.getElementById("startAudio");
-const styleSel = document.getElementById("soundStyle");
-const testBtn = document.getElementById("testSound");
-
-// restore saved style
-try{
-  const savedStyle = localStorage.getItem(STORAGE_SOUND_STYLE);
-  if(savedStyle){ soundStyle = savedStyle; if(styleSel) styleSel.value = savedStyle; }
-}catch(e){}
-
-if(styleSel){
-  styleSel.addEventListener("change", ()=>{
-    soundStyle = styleSel.value;
-    try{ localStorage.setItem(STORAGE_SOUND_STYLE, soundStyle); }catch(e){}
-  });
-}
-
-if(startBtn){
-  startBtn.onclick = async ()=>{
-    ensureAudio();
-    if(!audioOn){
-      if(ac && ac.state==="suspended") await ac.resume();
-      audioOn = true;
-      startBtn.textContent = "Sound Off";
-    }else{
-      if(ac && ac.state==="running") await ac.suspend();
-      audioOn = false;
-      startBtn.textContent = "Sound On";
-    }
-  };
-}
-
-if(testBtn){
-  testBtn.onclick = async ()=>{
-    ensureAudio();
-    if(ac && ac.state==="suspended") await ac.resume();
-    audioOn = true;
-    if(startBtn) startBtn.textContent = "Sound Off";
-    playSound({n:123},{n:77},1.0);
-  };
-}
-
 </script>
 </body>
 </html>
