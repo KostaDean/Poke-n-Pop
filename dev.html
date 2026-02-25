@@ -35,6 +35,7 @@ input[type=range]{width:170px}
   <option value="meow">Cat meow</option>
   <option value="roar">Lion roar</option>
 </select>
+<button id="testSound">Test</button>
 <button id="reset">Reset</button>
     <button id="pause">Pause</button>
   </div>
@@ -72,7 +73,7 @@ function ensureAudio(){
     if(!AC) return null;
     ac = new AC();
     master = ac.createGain();
-    master.gain.value = 0.7;
+    master.gain.value = 1.0;
     master.connect(ac.destination);
   }
   return ac;
@@ -205,38 +206,61 @@ function playRoar(freq, amp){
 
 function playLaugh(freq, amp){
   const ctx=ensureAudio(); if(!ctx) return;
-  const base=260+(freq%220);
-  const pulses=4 + (Math.floor(freq)%2);
   const now=ctx.currentTime;
-  for(let i=0;i<pulses;i++){
-    const t0=now+i*0.06;
-    const o=ctx.createOscillator(); const g=ctx.createGain();
-    o.type="square"; o.frequency.setValueAtTime(base, t0);
-    g.gain.setValueAtTime(0.0001,t0);
-    g.gain.exponentialRampToValueAtTime(0.10*amp,t0+0.008);
-    g.gain.exponentialRampToValueAtTime(0.0001,t0+0.05);
-    o.connect(g); g.connect(master);
-    o.start(t0); o.stop(t0+0.055);
 
-    // breath noise
-    const len=Math.max(1, Math.floor(ctx.sampleRate*0.05));
-    const buf=ctx.createBuffer(1,len,ctx.sampleRate);
-    const d=buf.getChannelData(0);
-    for(let j=0;j<len;j++) d[j]=(Math.random()*2-1);
-    const ns=ctx.createBufferSource(); ns.buffer=buf;
-    const bp=ctx.createBiquadFilter(); bp.type="bandpass"; bp.frequency.setValueAtTime(900,t0); bp.Q.setValueAtTime(7,t0);
-    const ng=ctx.createGain();
-    ng.gain.setValueAtTime(0.0001,t0);
-    ng.gain.exponentialRampToValueAtTime(0.07*amp,t0+0.008);
-    ng.gain.exponentialRampToValueAtTime(0.0001,t0+0.05);
-    ns.connect(bp); bp.connect(ng); ng.connect(master);
-    ns.start(t0); ns.stop(t0+0.055);
+  // "ha-ha" syllables: voiced oscillator + breathy noise + downward pitch bend
+  const syllables = 6;                 // more obvious
+  const gap = 0.07;
+  const base = 220 + (freq % 220);
+
+  // shared filter for a "mouth" formant
+  const form = ctx.createBiquadFilter();
+  form.type = "bandpass";
+  form.frequency.setValueAtTime(900, now);
+  form.Q.setValueAtTime(3.8, now);
+  form.connect(master);
+
+  for(let i=0;i<syllables;i++){
+    const t0 = now + i*gap;
+
+    // voiced component
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.type = "sawtooth";
+    const fStart = base * (1.15 - i*0.02);
+    const fEnd   = base * (0.78 - i*0.015);
+    o.frequency.setValueAtTime(fStart, t0);
+    o.frequency.exponentialRampToValueAtTime(Math.max(80, fEnd), t0+0.06);
+
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.20*amp, t0+0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0+0.065);
+
+    o.connect(g); g.connect(form);
+    o.start(t0); o.stop(t0+0.075);
+
+    // breathy noise burst
+    const dur = 0.065;
+    const len = Math.max(1, Math.floor(ctx.sampleRate*dur));
+    const buf = ctx.createBuffer(1,len,ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    for(let j=0;j<len;j++) d[j] = (Math.random()*2-1);
+    const ns = ctx.createBufferSource(); ns.buffer = buf;
+
+    const ng = ctx.createGain();
+    ng.gain.setValueAtTime(0.0001, t0);
+    ng.gain.exponentialRampToValueAtTime(0.10*amp, t0+0.008);
+    ng.gain.exponentialRampToValueAtTime(0.0001, t0+dur);
+
+    ns.connect(ng); ng.connect(form);
+    ns.start(t0); ns.stop(t0+dur+0.01);
   }
 }
 
 function playHitSound(numA, numB, impact=1){
+(numA, numB, impact=1){
   if(!audioOn) return;
-  const amp = Math.min(1, 0.35 + impact*0.22);
+  const amp = Math.min(1, 0.55 + impact*0.35);
   // map numbers to a pleasant-ish frequency
   const base = 140 + ((numA + numB) % 48) * 12; // ~140..716
   switch(soundStyle){
@@ -673,6 +697,18 @@ if(startBtn){
       audioOn = false;
       startBtn.textContent = "Sound On";
     }
+  };
+}
+
+const testBtn = document.getElementById("testSound");
+if(testBtn){
+  testBtn.onclick = async ()=>{
+    ensureAudio();
+    if(ac && ac.state==="suspended") await ac.resume();
+    audioOn = true;
+    if(startBtn) startBtn.textContent = "Sound Off";
+    // play an obvious test sound for the chosen style
+    playHitSound(123, 77, 1.0);
   };
 }
 </script>
