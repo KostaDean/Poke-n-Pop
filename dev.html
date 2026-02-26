@@ -775,12 +775,16 @@ function tapHandler(e){
   const px = (cx - rect.left) * dpr;
   const py = (cy - rect.top) * dpr;
   if(!isFinite(px) || !isFinite(py)) return;
+  // quick tap flash so you can see taps are detected
+  popFlash = Math.max(popFlash, 0.35);
+  popX = px; popY = py;
 
   // If tap hits a circle, remove it (and flash) and do NOT toggle panel
   for(let i=circles.length-1;i>=0;i--){
     const c = circles[i];
     const dx = px - c.x, dy = py - c.y;
     if(dx*dx + dy*dy <= c.r*c.r){
+      e.preventDefault();
       circles.splice(i,1);
       popFlash = 1.0;
       popX = px; popY = py;
@@ -797,8 +801,10 @@ function tapHandler(e){
     lastTap=now;
   }
 }
-if(window.PointerEvent) window.addEventListener("pointerdown", tapHandler, {passive:true});
-else window.addEventListener("touchstart", tapHandler, {passive:true});
+// Listen on both pointer and touch for iOS reliability
+window.addEventListener("pointerdown", tapHandler, {passive:false});
+window.addEventListener("touchstart", tapHandler, {passive:false});
+window.addEventListener("mousedown", tapHandler, {passive:false});
 
 /* ---------- main loop ---------- */
 let lastT=performance.now();
@@ -869,9 +875,15 @@ function loop(t){
     ctx.globalAlpha = a;
     ctx.globalCompositeOperation = "screen";
     ctx.fillStyle = "#fff6b0";
+    const R = (70*dpr) + (180*dpr)*(1-a);
     ctx.beginPath();
-    ctx.arc(popX, popY, (70*dpr) + (180*dpr)*(1-a), 0, Math.PI*2);
+    ctx.arc(popX, popY, R, 0, Math.PI*2);
     ctx.fill();
+    ctx.lineWidth = 10*dpr;
+    ctx.strokeStyle = "#ffffff";
+    ctx.beginPath();
+    ctx.arc(popX, popY, R*0.72, 0, Math.PI*2);
+    ctx.stroke();
     ctx.restore();
     popFlash = Math.max(0, popFlash - 0.035);
   }
