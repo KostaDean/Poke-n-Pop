@@ -57,8 +57,8 @@ input[type=range]{width:min(360px,55vw)}
 
   <div class="row">
     <label>Min circles</label>
-    <input id="minCircles" type="range" min="10" max="140" step="1" value="30">
-    <div class="val" id="minOut">30</div>
+    <input id="minCircles" type="range" min="5" max="120" step="1" value="12">
+    <div class="val" id="minOut">12</div>
   </div>
 
   <div class="row">
@@ -105,6 +105,11 @@ const overlay = {
   br:40,bg:50,bb:65,
   a:0.88, lerp:0.12, basePull:0.02
 };
+
+// --- pop effect ---
+let popFlash = 0;
+let popX = 0, popY = 0;
+
 
 function hslToRgb(h,s,l){
   h=((h%360)+360)%360;
@@ -345,6 +350,33 @@ function envGain(g, now, peak, attack=0.004, release=0.16){
   g.gain.setValueAtTime(0.0001, now);
   g.gain.exponentialRampToValueAtTime(Math.max(0.0002, peak), now+attack);
   g.gain.exponentialRampToValueAtTime(0.0001, now+Math.max(0.03, release));
+}
+
+function playPop(impact=1.0){
+  if(!audioOn) return;
+  const ctxA = ensureAudio();
+  if(!ctxA) return;
+  try{ if(!sfxLoaded){ loadAllSfx().catch(()=>{}); } }catch(e){}
+  const now = ctxA.currentTime;
+
+  // Use bark sample if loaded (punchy), otherwise synth pop
+  if(sfxLoaded && sfxBuffers && sfxBuffers.bark && sfxBuffers.bark.length){
+    playSample("bark", Math.min(1, 0.9*impact+0.2), 0.5);
+    return;
+  }
+
+  // Noise click
+  noiseBurst(ctxA, now, 0.035, 0.35*Math.min(1,impact), 500, 2500, 4);
+
+  // Low thump
+  const o = ctxA.createOscillator();
+  const g = ctxA.createGain();
+  o.type="sine";
+  o.frequency.setValueAtTime(120, now);
+  o.frequency.exponentialRampToValueAtTime(60, now+0.10);
+  envGain(g, now, 0.35*Math.min(1,impact), 0.003, 0.12);
+  o.connect(g); g.connect(masterGain || ctxA.destination);
+  o.start(now); o.stop(now+0.14);
 }
 
 function noiseBurst(ctx, now, dur, peak, hp=150, bp=900, q=6){
@@ -725,6 +757,25 @@ let lastTap=0;
 function isControlTarget(t){ return !!(t && t.closest && t.closest("#panel button, #panel input, #panel select, #panel textarea")); }
 function tapHandler(e){
   if(isControlTarget(e.target)) return;
+  /* pop circle on tap */
+  // Map screen coords -> canvas coords
+  const rect = canvas.getBoundingClientRect();
+  const px = (e.clientX - rect.left) * dpr;
+  const py = (e.clientY - rect.top) * dpr;
+
+  // If tap hits a circle, remove it (and flash) and do NOT toggle panel
+  for(let i=circles.length-1;i>=0;i--){
+    const c = circles[i];
+    const dx = px - c.x, dy = py - c.y;
+    if(dx*dx + dy*dy <= c.r*c.r){
+      circles.splice(i,1);
+      popFlash = 1.0;
+      popX = px; popY = py;
+      playPop(1.0);
+      return;
+    }
+  }
+
   const now=Date.now();
   if(now-lastTap<320){
     panelEl.style.display = (panelEl.style.display==="none") ? "block" : "none";
@@ -797,6 +848,19 @@ function loop(t){
   // overlay on top
   ctx.fillStyle = `rgba(${Math.round(overlay.r)},${Math.round(overlay.g)},${Math.round(overlay.b)},${overlay.a})`;
   ctx.fillRect(0,0,W,H);
+
+  // pop flash (on top)
+  if(popFlash > 0){
+    const a = popFlash;
+    ctx.save();
+    ctx.globalAlpha = a;
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath();
+    ctx.arc(popX, popY, (40*dpr) + (120*dpr)*(1-a), 0, Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+    popFlash = Math.max(0, popFlash - 0.06);
+  }
 
   requestAnimationFrame(loop);
 }
