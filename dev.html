@@ -361,12 +361,12 @@ function playPop(impact=1.0){
 
   // Use bark sample if loaded (punchy), otherwise synth pop
   if(sfxLoaded && sfxBuffers && sfxBuffers.bark && sfxBuffers.bark.length){
-    playSample("bark", Math.min(1, 0.9*impact+0.2), 0.5);
+    playSample("bark", Math.min(1, 1.2*impact+0.4), 0.5);
     return;
   }
 
   // Noise click
-  noiseBurst(ctxA, now, 0.035, 0.35*Math.min(1,impact), 500, 2500, 4);
+  noiseBurst(ctxA, now, 0.040, 0.55*Math.min(1,impact), 500, 2600, 4);
 
   // Low thump
   const o = ctxA.createOscillator();
@@ -374,7 +374,7 @@ function playPop(impact=1.0){
   o.type="sine";
   o.frequency.setValueAtTime(120, now);
   o.frequency.exponentialRampToValueAtTime(60, now+0.10);
-  envGain(g, now, 0.35*Math.min(1,impact), 0.003, 0.12);
+  envGain(g, now, 0.55*Math.min(1,impact), 0.003, 0.14);
   o.connect(g); g.connect(masterGain || ctxA.destination);
   o.start(now); o.stop(now+0.14);
 }
@@ -754,14 +754,27 @@ init();
 /* ---------- double-tap toggle panel ---------- */
 const panelEl=document.getElementById("panel");
 let lastTap=0;
+
+function getClientXY(e){
+  // Supports PointerEvent, MouseEvent, TouchEvent
+  if(e && typeof e.clientX === "number" && typeof e.clientY === "number"){
+    return {cx:e.clientX, cy:e.clientY};
+  }
+  const t = (e && e.touches && e.touches[0]) || (e && e.changedTouches && e.changedTouches[0]);
+  if(t) return {cx:t.clientX, cy:t.clientY};
+  return {cx:NaN, cy:NaN};
+}
+
 function isControlTarget(t){ return !!(t && t.closest && t.closest("#panel button, #panel input, #panel select, #panel textarea")); }
 function tapHandler(e){
   if(isControlTarget(e.target)) return;
   /* pop circle on tap */
   // Map screen coords -> canvas coords
   const rect = canvas.getBoundingClientRect();
-  const px = (e.clientX - rect.left) * dpr;
-  const py = (e.clientY - rect.top) * dpr;
+  const {cx,cy} = getClientXY(e);
+  const px = (cx - rect.left) * dpr;
+  const py = (cy - rect.top) * dpr;
+  if(!isFinite(px) || !isFinite(py)) return;
 
   // If tap hits a circle, remove it (and flash) and do NOT toggle panel
   for(let i=circles.length-1;i>=0;i--){
@@ -854,12 +867,13 @@ function loop(t){
     const a = popFlash;
     ctx.save();
     ctx.globalAlpha = a;
-    ctx.fillStyle = "#ffffff";
+    ctx.globalCompositeOperation = "screen";
+    ctx.fillStyle = "#fff6b0";
     ctx.beginPath();
-    ctx.arc(popX, popY, (40*dpr) + (120*dpr)*(1-a), 0, Math.PI*2);
+    ctx.arc(popX, popY, (70*dpr) + (180*dpr)*(1-a), 0, Math.PI*2);
     ctx.fill();
     ctx.restore();
-    popFlash = Math.max(0, popFlash - 0.06);
+    popFlash = Math.max(0, popFlash - 0.035);
   }
 
   requestAnimationFrame(loop);
