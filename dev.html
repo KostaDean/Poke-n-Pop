@@ -44,6 +44,12 @@ input[type=range]{width:min(360px,55vw)}
     <button id="pause">Pause</button>
   </div>
 
+  <div class="row">
+    <label>Volume</label>
+    <input id="sfxVol" type="range" min="0" max="1" step="0.01" value="0.85">
+    <div class="val" id="sfxVolOut">0.85</div>
+  </div>
+
   <div class="small">
     Collision: sound + both +1, then division (L→q, remainder r spawns). Auto-reseed keeps population above minimum.
     <br>Double‑tap anywhere to hide/show this panel (sliders/buttons still work).
@@ -188,6 +194,96 @@ function ensureAudio(){
     o.connect(g); g.connect(master);
     o.start(); o.stop(ac.currentTime+0.09);
   }
+
+// ---- REAL SFX via WebAudio (decoded buffers) ----
+const SFX_URLS = {
+  piano: ["assets/sfx/Piano1.mp3"],
+  laugh: ["assets/sfx/Laughter2.mp3"],
+  bark:  ["assets/sfx/DogBark2.mp3"],
+  meow:  ["assets/sfx/CatMeaw1.mp3"],
+  roar:  ["assets/sfx/LionRoar.mp3"]
+};
+
+let sfxLoaded = false;
+const sfxBuffers = {}; // key -> AudioBuffer[]
+let masterGain = null;
+let compressor = null;
+
+function initMasterChain(){
+  if(masterGain) return;
+  masterGain = ac.createGain();
+  masterGain.gain.value = 0.85;
+
+  compressor = ac.createDynamicsCompressor();
+  compressor.threshold.value = -18;
+  compressor.knee.value = 22;
+  compressor.ratio.value = 3.5;
+  compressor.attack.value = 0.006;
+  compressor.release.value = 0.18;
+
+  masterGain.connect(compressor);
+  compressor.connect(ac.destination);
+}
+
+async function loadOne(url){
+  const res = await fetch(url, { cache: "force-cache" });
+  if(!res.ok) throw new Error(`Fetch failed ${res.status}: ${url}`);
+  const arr = await res.arrayBuffer();
+  return await ac.decodeAudioData(arr);
+}
+
+async function loadAllSfx(){
+  if(sfxLoaded) return;
+  ensureAudio();
+  initMasterChain();
+  sfxLoaded = true;
+
+  for(const [key, list] of Object.entries(SFX_URLS)){
+    sfxBuffers[key] = [];
+    for(const url of list){
+      try{
+        sfxBuffers[key].push(await loadOne(url));
+      }catch(e){
+        console.warn("SFX load failed:", url, e);
+      }
+    }
+  }
+}
+
+let activeVoices = 0;
+const MAX_VOICES = 10;
+
+function playSample(key, impact=0.6, xNorm=0.5){
+  if(!audioOn || !ac) return;
+  const list = sfxBuffers[key];
+  if(!list || list.length === 0) return;
+  if(activeVoices >= MAX_VOICES) return;
+
+  const buf = list[(Math.random()*list.length)|0];
+  const src = ac.createBufferSource();
+  src.buffer = buf;
+  src.playbackRate.value = 0.95 + Math.random()*0.10;
+
+  const g = ac.createGain();
+  const base = (typeof sfxVolume === "number") ? sfxVolume : 0.85;
+  const vol = Math.min(1, (0.20 + impact*0.90) * base);
+  g.gain.value = vol;
+
+  let last = g;
+  if(ac.createStereoPanner){
+    const p = ac.createStereoPanner();
+    p.pan.value = Math.max(-1, Math.min(1, (xNorm*2-1)));
+    g.connect(p);
+    last = p;
+  }
+
+  src.connect(g);
+  last.connect(masterGain);
+
+  activeVoices++;
+  src.onended = ()=>{ activeVoices = Math.max(0, activeVoices-1); };
+  src.start();
+}
   return ac;
 }
 
@@ -414,25 +510,21 @@ function playLaugh(ctx, now, freq, amp){
   }
 }
 
-function playHit(a,b,impact){
+function playHit(a,b,impact, hitXNorm=0.5){
   if(!audioOn) return;
+  const nA=a.n||0, nB=b.n||0;
+  const amp=Math.min(1, 0.55 + (impact||0)*0.35);
+  if(soundStyle && soundStyle !== "synth"){
+    if(!sfxLoaded){ loadAllSfx().catch(()=>{}); }
+    playSample(soundStyle, amp, hitXNorm);
+    return;
+  }
+  // synth fallback
   const ctxA = ensureAudio(); if(!ctxA) return;
   const now = ctxA.currentTime;
-  const nA=a.n||0, nB=b.n||0;
+  const freq=140 + ((nA*3+nB*5)%60)*10;
+  playSynth(ctxA, now, freq, amp);
 
-  // Map numbers to frequency; impact to loudness
-  const amp=Math.min(1, 0.60 + (impact||0)*0.40);
-  const freq=140 + ((nA*3+nB*5)%60)*10; // ~140..740
-  // If using real samples, play them; otherwise fall back to synth.
-  const impact01 = Math.max(0, Math.min(1, impact||0));
-  switch(soundStyle){
-    case "piano": playSample("piano", impact01); break;
-    case "laugh": playSample("laugh", impact01); break;
-    case "bark":  playSample("bark",  impact01); break;
-    case "meow":  playSample("meow",  impact01); break;
-    case "roar":  playSample("roar",  impact01); break;
-    default:      playSynth(ctxA, now, freq, amp); break;
-  }
 }
 
 /* ---------- circles + division ecosystem ---------- */
@@ -537,7 +629,8 @@ function resolve(a,b,nowS){
   updatePhysical(a); updatePhysical(b);
 
   const impact=Math.min(1, Math.abs(velAlong)/(280*dpr));
-  playHit(a,b,impact);
+  const hitXNorm = ((a.x + b.x) * 0.5) / W;
+  playHit(a,b,impact, hitXNorm);
   bumpOverlayColor();
 
   applyDivision(a,b,nx,ny,nowS);
@@ -556,12 +649,15 @@ const resetBtn=document.getElementById("reset");
 const soundBtn=document.getElementById("soundBtn");
 const styleSel=document.getElementById("soundStyle");
 const testBtn=document.getElementById("testSound");
+const sfxVolEl=document.getElementById("sfxVol");
+const sfxVolOut=document.getElementById("sfxVolOut");
 
 function updUI(){
   minOut.textContent=minEl.value;
   seedOut.textContent=seedEl.value;
   opacOut.textContent=parseFloat(opacEl.value).toFixed(2);
   hueOut.textContent=hueEl.value;
+  if(sfxVolOut && sfxVolEl){ sfxVolOut.textContent = parseFloat(sfxVolEl.value).toFixed(2); }
 }
 minEl.addEventListener("input", updUI);
 seedEl.addEventListener("input", updUI);
@@ -577,9 +673,15 @@ try{
   if(savedStyle){ soundStyle=savedStyle; styleSel.value=savedStyle; }
 }catch(e){}
 styleSel.addEventListener("change", ()=>{
+  // (style change)
+
   soundStyle=styleSel.value;
   try{ localStorage.setItem(STORAGE_SOUND_STYLE, soundStyle); }catch(e){}
 });
+
+if(sfxVolEl){
+  sfxVolEl.addEventListener("input", ()=>{ sfxVolume = parseFloat(sfxVolEl.value); updUI(); });
+}
 
 soundBtn.onclick = async ()=>{
   const ctxA=ensureAudio();
