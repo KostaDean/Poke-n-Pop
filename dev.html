@@ -754,6 +754,7 @@ init();
 /* ---------- double-tap toggle panel ---------- */
 const panelEl=document.getElementById("panel");
 let lastTap=0;
+let lastPointerDown=0;
 
 function getClientXY(e){
   // Supports PointerEvent, MouseEvent, TouchEvent
@@ -768,6 +769,10 @@ function getClientXY(e){
 function isControlTarget(t){ return !!(t && t.closest && t.closest("#panel button, #panel input, #panel select, #panel textarea")); }
 function tapHandler(e){
   if(isControlTarget(e.target)) return;
+  // ignore synthetic duplicate events (iOS often fires pointerdown + touchstart)
+  const tNow = Date.now();
+  if(e.type === 'pointerdown') lastPointerDown = tNow;
+  if(e.type === 'touchstart' && (tNow - lastPointerDown) < 500) return;
   /* pop circle on tap */
   // Map screen coords -> canvas coords
   const rect = canvas.getBoundingClientRect();
@@ -783,7 +788,8 @@ function tapHandler(e){
   for(let i=circles.length-1;i>=0;i--){
     const c = circles[i];
     const dx = px - c.x, dy = py - c.y;
-    if(dx*dx + dy*dy <= c.r*c.r){
+    const rr = (c.r + 12*dpr);
+    if(dx*dx + dy*dy <= rr*rr){
       e.preventDefault();
       circles.splice(i,1);
       popFlash = 1.0;
@@ -801,10 +807,13 @@ function tapHandler(e){
     lastTap=now;
   }
 }
-// Listen on both pointer and touch for iOS reliability
-window.addEventListener("pointerdown", tapHandler, {passive:false});
-window.addEventListener("touchstart", tapHandler, {passive:false});
-window.addEventListener("mousedown", tapHandler, {passive:false});
+// Canvas-based tap handler
+if(window.PointerEvent){
+  canvas.addEventListener("pointerdown", tapHandler, {passive:false});
+}else{
+  canvas.addEventListener("touchstart", tapHandler, {passive:false});
+  canvas.addEventListener("mousedown", tapHandler, {passive:false});
+}
 
 /* ---------- main loop ---------- */
 let lastT=performance.now();
@@ -871,21 +880,29 @@ function loop(t){
   // pop flash (on top)
   if(popFlash > 0){
     const a = popFlash;
+    const R = (90*dpr) + (240*dpr)*(1-a);
     ctx.save();
-    ctx.globalAlpha = a;
+    ctx.globalAlpha = 1.0;                 // keep it bright
     ctx.globalCompositeOperation = "screen";
-    ctx.fillStyle = "#fff6b0";
-    const R = (70*dpr) + (180*dpr)*(1-a);
+
+    const grad = ctx.createRadialGradient(popX,popY,0,popX,popY,R);
+    grad.addColorStop(0, `rgba(255,255,255,${0.95*a})`);
+    grad.addColorStop(0.35, `rgba(255,255,210,${0.85*a})`);
+    grad.addColorStop(1, "rgba(255,255,210,0)");
+
+    ctx.fillStyle = grad;
     ctx.beginPath();
     ctx.arc(popX, popY, R, 0, Math.PI*2);
     ctx.fill();
-    ctx.lineWidth = 10*dpr;
-    ctx.strokeStyle = "#ffffff";
+
+    ctx.lineWidth = 12*dpr;
+    ctx.strokeStyle = `rgba(255,255,255,${0.8*a})`;
     ctx.beginPath();
-    ctx.arc(popX, popY, R*0.72, 0, Math.PI*2);
+    ctx.arc(popX, popY, R*0.62, 0, Math.PI*2);
     ctx.stroke();
+
     ctx.restore();
-    popFlash = Math.max(0, popFlash - 0.035);
+    popFlash = Math.max(0, popFlash - 0.028);
   }
 
   requestAnimationFrame(loop);
