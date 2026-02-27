@@ -6,7 +6,7 @@
 <title>Number Collisions: Color Field + Sound Styles</title>
 <style>
 html,body{margin:0;height:100%;background:#0b0f14;overflow:hidden;font-family:-apple-system,system-ui;}
-canvas{display:block;touch-action:manipulation;}
+canvas{display:block;touch-action:none;}
 #panel{
  position:fixed;top:12px;left:12px;right:12px;
  background:rgba(0,0,0,.55); color:#fff;
@@ -549,6 +549,7 @@ function updatePhysical(c){
 let circles=[];
 
 // --- tap-to-pop effect ---
+let tapMark=0; let tapX=0, tapY=0;
 let popFlash = 0;
 let popX = 0, popY = 0;
 
@@ -814,6 +815,8 @@ function onCanvasTap(e){
   const py = (cy - rect.top) * dpr;
   if(!isFinite(px) || !isFinite(py)) return;
 
+  // mark tap (always)
+  tapMark = 1.0; tapX = px; tapY = py;
   // small debug flash even on miss
   popFlash = Math.max(popFlash, 0.35);
   popX = px; popY = py;
@@ -822,12 +825,23 @@ function onCanvasTap(e){
   if(popped) e.preventDefault();
 }
 
-if(window.PointerEvent){
-  canvas.addEventListener("pointerdown", onCanvasTap, {passive:false});
-}else{
-  canvas.addEventListener("touchstart", onCanvasTap, {passive:false});
-  canvas.addEventListener("mousedown", onCanvasTap, {passive:false});
+// Attach both pointer + touch for iOS reliability (avoid missing events)
+let lastPointerDown = 0;
+function unifiedTap(e){
+  const tNow = Date.now();
+  if(e.type === "pointerdown") lastPointerDown = tNow;
+  // iOS sometimes fires a synthetic touch after pointer; ignore it
+  if(e.type === "touchstart" && (tNow - lastPointerDown) < 500) return;
+  onCanvasTap(e);
 }
+
+canvas.addEventListener("pointerdown", unifiedTap, {passive:false});
+canvas.addEventListener("touchstart", unifiedTap, {passive:false});
+canvas.addEventListener("mousedown", unifiedTap, {passive:false});
+
+// Hard fallback: if canvas somehow doesn't get events, listen on document
+document.addEventListener("touchstart", unifiedTap, {passive:false});
+document.addEventListener("pointerdown", unifiedTap, {passive:false});
 
 function loop(t){
   const dt=Math.min(0.03,(t-lastT)/1000);
