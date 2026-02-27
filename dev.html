@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Screamsaver Bounce + Sound</title>
+<title>Screamsaver Bounce + Sound (v2)</title>
 <style>
 html,body{margin:0;height:100%;background:#000;overflow:hidden;font-family:system-ui}
 canvas{display:block;width:100vw;height:100vh;touch-action:none}
@@ -15,6 +15,7 @@ canvas{display:block;width:100vw;height:100vh;touch-action:none}
 button{font-size:18px;border-radius:14px;padding:8px 14px;margin:4px;
  border:1px solid rgba(255,255,255,.35);
  background:rgba(255,255,255,.10);color:#fff}
+.small{font-size:13px;opacity:.85;margin:6px 4px 0}
 </style>
 </head>
 <body>
@@ -22,9 +23,9 @@ button{font-size:18px;border-radius:14px;padding:8px 14px;margin:4px;
 <canvas id="c"></canvas>
 
 <div id="panel">
-<button id="reset">Reset</button>
-<button id="sound">Sound On</button>
-<p>Single tap = POP<br>Double tap = toggle panel</p>
+  <button id="reset">Reset</button>
+  <button id="sound">Sound On</button>
+  <div class="small">Single tap = POP • Double tap = toggle panel</div>
 </div>
 
 <script>
@@ -34,6 +35,7 @@ const panel=document.getElementById("panel");
 
 let dpr=window.devicePixelRatio||1;
 function resize(){
+ dpr=window.devicePixelRatio||1;
  canvas.width=innerWidth*dpr;
  canvas.height=innerHeight*dpr;
  canvas.style.width=innerWidth+"px";
@@ -42,27 +44,81 @@ function resize(){
 resize();
 addEventListener("resize",resize);
 
-// audio
+// ---- Audio (iOS-safe): collision blip + BIG pop ----
 let audioOn=true;
 let ac=null;
+let master=null;
+
 function ensureAudio(){
  if(!audioOn) return;
- if(!ac) ac=new (window.AudioContext||window.webkitAudioContext)();
+ if(!ac){
+  ac=new (window.AudioContext||window.webkitAudioContext)();
+  master=ac.createGain();
+  master.gain.value=0.95;
+  master.connect(ac.destination);
+ }
  if(ac.state==="suspended") ac.resume();
 }
-function blip(freq=220,vol=0.3,dur=0.08){
+
+function blip(freq=220,vol=0.18,dur=0.05,type="sine"){
  if(!audioOn) return;
  ensureAudio();
+ const t=ac.currentTime;
  const o=ac.createOscillator();
  const g=ac.createGain();
- o.frequency.value=freq;
- o.type="sine";
- g.gain.value=vol;
- o.connect(g);g.connect(ac.destination);
- o.start();
- o.stop(ac.currentTime+dur);
+ o.type=type;
+ o.frequency.setValueAtTime(freq,t);
+ g.gain.setValueAtTime(0.0001,t);
+ g.gain.exponentialRampToValueAtTime(Math.max(0.0002,vol),t+0.006);
+ g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+ o.connect(g); g.connect(master);
+ o.start(t);
+ o.stop(t+dur+0.01);
 }
 
+// louder + sharper "pop": layered click + noise burst + pitch drop
+function bigPop(){
+ if(!audioOn) return;
+ ensureAudio();
+ const t=ac.currentTime;
+
+ // 1) click transient
+ blip(1200, 0.35, 0.02, "square");
+
+ // 2) descending thump
+ const o=ac.createOscillator();
+ const g=ac.createGain();
+ o.type="sine";
+ o.frequency.setValueAtTime(220,t);
+ o.frequency.exponentialRampToValueAtTime(70,t+0.14);
+ g.gain.setValueAtTime(0.0001,t);
+ g.gain.exponentialRampToValueAtTime(0.85,t+0.01);
+ g.gain.exponentialRampToValueAtTime(0.0001,t+0.18);
+ o.connect(g); g.connect(master);
+ o.start(t);
+ o.stop(t+0.20);
+
+ // 3) short noise burst for "air pop"
+ const dur=0.10, sr=ac.sampleRate;
+ const buf=ac.createBuffer(1, Math.floor(sr*dur), sr);
+ const data=buf.getChannelData(0);
+ for(let i=0;i<data.length;i++){
+  const x=i/data.length;
+  // emphasize start; soften tail
+  data[i]=(Math.random()*2-1)*Math.pow(1-x,2.4);
+ }
+ const src=ac.createBufferSource(); src.buffer=buf;
+ const ng=ac.createGain();
+ // slightly lower to avoid clipping
+ ng.gain.setValueAtTime(0.0001,t);
+ ng.gain.exponentialRampToValueAtTime(0.55,t+0.01);
+ ng.gain.exponentialRampToValueAtTime(0.0001,t+0.12);
+ src.connect(ng); ng.connect(master);
+ src.start(t);
+ src.stop(t+dur+0.02);
+}
+
+// ---- Circles ----
 let circles=[];
 function seed(n=18){
  circles=[];
@@ -70,9 +126,9 @@ function seed(n=18){
   circles.push({
    x:Math.random()*canvas.width,
    y:Math.random()*canvas.height,
-   r:20*dpr+Math.random()*25*dpr,
-   vx:(Math.random()-0.5)*2*dpr,
-   vy:(Math.random()-0.5)*2*dpr
+   r:(20+Math.random()*25)*dpr,
+   vx:(Math.random()-0.5)*2.2*dpr,
+   vy:(Math.random()-0.5)*2.2*dpr
   });
  }
 }
@@ -82,70 +138,101 @@ function collide(a,b){
  const dx=b.x-a.x;
  const dy=b.y-a.y;
  const dist=Math.hypot(dx,dy);
- if(dist<a.r+b.r){
-  const angle=Math.atan2(dy,dx);
-  const overlap=a.r+b.r-dist;
-  const ax=Math.cos(angle)*overlap/2;
-  const ay=Math.sin(angle)*overlap/2;
-  a.x-=ax; a.y-=ay;
-  b.x+=ax; b.y+=ay;
-  const tmpVx=a.vx; const tmpVy=a.vy;
-  a.vx=b.vx; a.vy=b.vy;
-  b.vx=tmpVx; b.vy=tmpVy;
-  blip(180+Math.random()*200,0.15,0.05);
+ const min=a.r+b.r;
+ if(dist<min && dist>0.0001){
+  // separate
+  const nx=dx/dist, ny=dy/dist;
+  const overlap=min-dist;
+  a.x-=nx*overlap/2; a.y-=ny*overlap/2;
+  b.x+=nx*overlap/2; b.y+=ny*overlap/2;
+
+  // simple elastic along normal (equal mass)
+  const dvx=b.vx-a.vx, dvy=b.vy-a.vy;
+  const vn=dvx*nx + dvy*ny;
+  if(vn<0){
+    const impulse = -2*vn/2;
+    a.vx -= impulse*nx; a.vy -= impulse*ny;
+    b.vx += impulse*nx; b.vy += impulse*ny;
+  }
+
+  // collision sound (subtle)
+  blip(180+Math.random()*220, 0.12, 0.045, "sine");
  }
 }
 
+// ---- Flash ----
 let flash=0,fx=0,fy=0;
 function drawFlash(){
  if(flash<=0) return;
  ctx.save();
  ctx.globalCompositeOperation="screen";
- const g=ctx.createRadialGradient(fx,fy,0,fx,fy,150*dpr);
+ const R=160*dpr;
+ const g=ctx.createRadialGradient(fx,fy,0,fx,fy,R);
  g.addColorStop(0,"rgba(255,255,255,"+flash+")");
+ g.addColorStop(0.35,"rgba(255,255,210,"+(flash*0.75)+")");
  g.addColorStop(1,"rgba(255,255,255,0)");
  ctx.fillStyle=g;
  ctx.beginPath();
- ctx.arc(fx,fy,150*dpr,0,Math.PI*2);
+ ctx.arc(fx,fy,R,0,Math.PI*2);
  ctx.fill();
  ctx.restore();
- flash-=0.05;
+ flash-=0.06;
 }
 
+// ---- Loop ----
 function loop(){
  ctx.fillStyle="#000";
  ctx.fillRect(0,0,canvas.width,canvas.height);
 
+ // move + wall bounce
  for(let c of circles){
   c.x+=c.vx;
   c.y+=c.vy;
-  if(c.x-c.r<0||c.x+c.r>canvas.width) c.vx*=-1;
-  if(c.y-c.r<0||c.y+c.r>canvas.height) c.vy*=-1;
+  if(c.x-c.r<0){c.x=c.r;c.vx*=-1}
+  if(c.x+c.r>canvas.width){c.x=canvas.width-c.r;c.vx*=-1}
+  if(c.y-c.r<0){c.y=c.r;c.vy*=-1}
+  if(c.y+c.r>canvas.height){c.y=canvas.height-c.r;c.vy*=-1}
  }
 
+ // circle collisions
  for(let i=0;i<circles.length;i++){
   for(let j=i+1;j<circles.length;j++){
    collide(circles[i],circles[j]);
   }
  }
 
+ // draw
  ctx.fillStyle="#d85a4a";
  for(let c of circles){
   ctx.beginPath();
   ctx.arc(c.x,c.y,c.r,0,Math.PI*2);
   ctx.fill();
  }
-
  drawFlash();
+
  requestAnimationFrame(loop);
 }
-loop();
+requestAnimationFrame(loop);
 
+// ---- Taps: single pop, double toggle panel ----
 let lastTap=0;
+function handleTap(x,y){
+ for(let i=circles.length-1;i>=0;i--){
+  const c=circles[i];
+  const dx=x-c.x,dy=y-c.y;
+  if(dx*dx+dy*dy < c.r*c.r){
+   circles.splice(i,1);
+   fx=c.x; fy=c.y; flash=1.0;
+   bigPop();
+   break;
+  }
+ }
+}
+
 canvas.addEventListener("pointerdown",e=>{
  const now=Date.now();
  if(now-lastTap<300){
-  panel.style.display=panel.style.display==="none"?"block":"none";
+  panel.style.display = (panel.style.display==="none") ? "block" : "none";
   lastTap=0;
   return;
  }
@@ -154,19 +241,10 @@ canvas.addEventListener("pointerdown",e=>{
  const rect=canvas.getBoundingClientRect();
  const x=(e.clientX-rect.left)*dpr;
  const y=(e.clientY-rect.top)*dpr;
-
- for(let i=circles.length-1;i>=0;i--){
-  const c=circles[i];
-  const dx=x-c.x,dy=y-c.y;
-  if(dx*dx+dy*dy<c.r*c.r){
-   circles.splice(i,1);
-   fx=c.x;fy=c.y;flash=1;
-   blip(80,0.6,0.15);
-   break;
-  }
- }
+ handleTap(x,y);
 },{passive:false});
 
+// ---- UI ----
 document.getElementById("reset").onclick=()=>seed();
 document.getElementById("sound").onclick=()=>{
  audioOn=!audioOn;
