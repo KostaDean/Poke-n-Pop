@@ -1,40 +1,50 @@
-<!DOCTYPE html>
-<html>
+<!doctype html>
+<html lang="en">
 <head>
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
+<title>Screamsaver</title>
 <style>
-html,body{
-  margin:0;
-  padding:0;
-  background:#000;
-  overflow:hidden;
-  font-family:system-ui;
-}
-canvas{
-  display:block;
-  touch-action:none;
-}
-#panel{
-  position:fixed;
-  top:10px;
-  left:10px;
-  right:10px;
-  background:#111;
-  color:#fff;
-  padding:15px;
-  border-radius:16px;
-}
-button,select,input{
-  font-size:16px;
-  margin:4px;
-}
-.row{
-  margin:8px 0;
-}
-label{
-  display:inline-block;
-  width:100px;
-}
+  html,body{
+    margin:0; padding:0; width:100%; height:100%;
+    background:#000; overflow:hidden;
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  }
+  canvas{ display:block; width:100vw; height:100vh; touch-action:none; }
+
+  #panel{
+    position:fixed;
+    top:14px; left:14px; right:14px;
+    background: rgba(20,20,22,0.88);
+    color:#fff;
+    border-radius:18px;
+    padding:14px 14px 12px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.55);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    user-select:none;
+  }
+  .controls{
+    display:flex; gap:10px; flex-wrap:wrap; align-items:center;
+    margin-bottom:10px;
+  }
+  button, select{
+    appearance:none;
+    -webkit-appearance:none;
+    border:1px solid rgba(255,255,255,0.35);
+    background: rgba(255,255,255,0.10);
+    color:#fff;
+    padding:10px 14px;
+    border-radius:16px;
+    font-size:18px;
+  }
+  select{ padding-right:40px; }
+  .row{ display:flex; align-items:center; gap:12px; margin:10px 0; }
+  .row label{ width:110px; opacity:0.95; font-size:18px; }
+  .row input[type="range"]{ flex:1; }
+  .val{ width:64px; text-align:right; font-variant-numeric: tabular-nums; font-size:20px; opacity:0.95; }
+
+  .hint{ font-size:14px; opacity:0.85; margin-top:6px; line-height:1.25; }
 </style>
 </head>
 <body>
@@ -42,148 +52,315 @@ label{
 <canvas id="c"></canvas>
 
 <div id="panel">
-  <button id="soundBtn">Sound On</button>
-  <select id="soundType">
-    <option value="synth">Synth</option>
-  </select>
-  <button id="resetBtn">Reset</button>
-  <button id="pauseBtn">Pause</button>
+  <div class="controls">
+    <button id="soundBtn">Sound On</button>
+    <select id="soundType">
+      <option value="synth" selected>Synth</option>
+    </select>
+    <button id="resetBtn">Reset</button>
+    <button id="pauseBtn">Pause</button>
+  </div>
+
+  <div class="row">
+    <label>Volume</label>
+    <input id="vol" type="range" min="0" max="1" step="0.01" value="0.85">
+    <div class="val" id="volOut">0.85</div>
+  </div>
+
+  <div class="row">
+    <label>Speed</label>
+    <input id="speed" type="range" min="0.2" max="2.5" step="0.05" value="0.85">
+    <div class="val" id="speedOut">0.85</div>
+  </div>
 
   <div class="row">
     <label>Min circles</label>
-    <input type="range" id="minRange" min="5" max="60" value="30">
+    <input id="minCircles" type="range" min="5" max="80" step="1" value="30">
+    <div class="val" id="minOut">30</div>
   </div>
 
   <div class="row">
     <label>Seed rate</label>
-    <input type="range" id="seedRange" min="0.2" max="3" step="0.1" value="1.2">
+    <input id="seedRate" type="range" min="0.2" max="3" step="0.1" value="1.2">
+    <div class="val" id="seedOut">1.2</div>
   </div>
 
-  <div style="font-size:14px;margin-top:8px;">
-    Double-tap anywhere to hide/show this panel.
+  <div class="hint">
+    • Single tap a circle to <b>POP</b> it (flash + loud pop).<br>
+    • Double-tap anywhere to hide/show this panel.
   </div>
 </div>
 
 <script>
-const canvas=document.getElementById("c");
-const ctx=canvas.getContext("2d");
+(() => {
+  // ---------- canvas + DPR ----------
+  const canvas = document.getElementById("c");
+  const ctx = canvas.getContext("2d");
+  let dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+  function resize(){
+    dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+    canvas.width = Math.floor(innerWidth * dpr);
+    canvas.height = Math.floor(innerHeight * dpr);
+    canvas.style.width = innerWidth + "px";
+    canvas.style.height = innerHeight + "px";
+  }
+  addEventListener("resize", resize, {passive:true});
+  resize();
 
-function resize(){
-  canvas.width=window.innerWidth;
-  canvas.height=window.innerHeight;
-}
-resize();
-window.addEventListener("resize",resize);
+  // ---------- UI ----------
+  const panel = document.getElementById("panel");
+  const soundBtn = document.getElementById("soundBtn");
+  const resetBtn = document.getElementById("resetBtn");
+  const pauseBtn = document.getElementById("pauseBtn");
 
-let circles=[];
-let minCircles=30;
-let seedRate=1.2;
-let paused=false;
-let soundOn=true;
+  const volEl = document.getElementById("vol");
+  const volOut = document.getElementById("volOut");
+  const speedEl = document.getElementById("speed");
+  const speedOut = document.getElementById("speedOut");
 
-const audioCtx=new (window.AudioContext||window.webkitAudioContext)();
+  const minEl = document.getElementById("minCircles");
+  const minOut = document.getElementById("minOut");
+  const seedEl = document.getElementById("seedRate");
+  const seedOut = document.getElementById("seedOut");
 
-function playSound(){
-  if(!soundOn) return;
-  const osc=audioCtx.createOscillator();
-  const gain=audioCtx.createGain();
-  osc.frequency.value=300+Math.random()*400;
-  gain.gain.value=0.2;
-  osc.connect(gain);
-  gain.connect(audioCtx.destination);
-  osc.start();
-  osc.stop(audioCtx.currentTime+0.1);
-}
+  let volume = parseFloat(volEl.value);
+  let speedMul = parseFloat(speedEl.value);
+  let minCircles = parseInt(minEl.value, 10);
+  let seedRate = parseFloat(seedEl.value);
 
-function addCircle(){
-  circles.push({
-    x:Math.random()*canvas.width,
-    y:Math.random()*canvas.height,
-    r:20+Math.random()*20,
-    vx:(Math.random()-0.5)*2,
-    vy:(Math.random()-0.5)*2
+  function updUI(){
+    volOut.textContent = volume.toFixed(2);
+    speedOut.textContent = speedMul.toFixed(2);
+    minOut.textContent = String(minCircles);
+    seedOut.textContent = seedRate.toFixed(1);
+  }
+  updUI();
+
+  volEl.addEventListener("input", () => { volume = parseFloat(volEl.value); updUI(); }, {passive:true});
+  speedEl.addEventListener("input", () => { speedMul = parseFloat(speedEl.value); updUI(); }, {passive:true});
+  minEl.addEventListener("input", () => { minCircles = parseInt(minEl.value,10); updUI(); }, {passive:true});
+  seedEl.addEventListener("input", () => { seedRate = parseFloat(seedEl.value); updUI(); }, {passive:true});
+
+  // prevent panel interaction from being interpreted as canvas tap
+  ["pointerdown","touchstart","mousedown"].forEach(ev=>{
+    panel.addEventListener(ev, (e)=>e.stopPropagation(), {passive:false});
   });
-}
 
-function update(){
-  if(paused) return;
+  // ---------- audio ----------
+  let audioOn = true;
+  let ac = null;
+  let master = null;
 
-  while(circles.length<minCircles){
-    addCircle();
+  function ensureAudio(){
+    if(!audioOn) return null;
+    if(!ac){
+      ac = new (window.AudioContext || window.webkitAudioContext)();
+      master = ac.createGain();
+      master.gain.value = volume;
+      master.connect(ac.destination);
+    }
+    // iOS: resume needed after user gesture
+    if(ac.state === "suspended"){
+      try { ac.resume(); } catch(e){}
+    }
+    master.gain.value = volume;
+    return ac;
   }
 
-  circles.forEach(c=>{
-    c.x+=c.vx;
-    c.y+=c.vy;
-    if(c.x<0||c.x>canvas.width) c.vx*=-1;
-    if(c.y<0||c.y>canvas.height) c.vy*=-1;
+  function playCollision(){
+    if(!audioOn) return;
+    const A = ensureAudio(); if(!A) return;
+    const t = A.currentTime;
+    const o = A.createOscillator();
+    const g = A.createGain();
+    o.type = "sine";
+    o.frequency.setValueAtTime(260 + Math.random()*520, t);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.22*volume, t+0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t+0.12);
+    o.connect(g); g.connect(master);
+    o.start(t); o.stop(t+0.13);
+  }
+
+  function playPop(){
+    if(!audioOn) return;
+    const A = ensureAudio(); if(!A) return;
+    const t = A.currentTime;
+
+    // loud clicky pop: noise burst
+    const dur = 0.06;
+    const sr = A.sampleRate;
+    const buf = A.createBuffer(1, Math.floor(sr*dur), sr);
+    const data = buf.getChannelData(0);
+    for(let i=0;i<data.length;i++){
+      const x = i / data.length;
+      data[i] = (Math.random()*2-1) * Math.pow(1-x, 2.8);
+    }
+    const src = A.createBufferSource();
+    src.buffer = buf;
+
+    const bp = A.createBiquadFilter();
+    bp.type = "bandpass";
+    bp.frequency.value = 900;
+    bp.Q.value = 2.2;
+
+    const g = A.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.95*volume, t+0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, t+0.09);
+
+    src.connect(bp); bp.connect(g); g.connect(master);
+    src.start(t); src.stop(t+dur);
+
+    // add a little low thump
+    const o = A.createOscillator();
+    const g2 = A.createGain();
+    o.type = "sine";
+    o.frequency.setValueAtTime(140, t);
+    o.frequency.exponentialRampToValueAtTime(65, t+0.12);
+    g2.gain.setValueAtTime(0.0001, t);
+    g2.gain.exponentialRampToValueAtTime(0.55*volume, t+0.01);
+    g2.gain.exponentialRampToValueAtTime(0.0001, t+0.18);
+    o.connect(g2); g2.connect(master);
+    o.start(t); o.stop(t+0.2);
+  }
+
+  soundBtn.addEventListener("click", ()=>{
+    audioOn = !audioOn;
+    soundBtn.textContent = audioOn ? "Sound On" : "Sound Off";
+    if(audioOn) ensureAudio();
   });
 
-  for(let i=0;i<circles.length;i++){
-    for(let j=i+1;j<circles.length;j++){
-      const a=circles[i];
-      const b=circles[j];
-      const dx=a.x-b.x;
-      const dy=a.y-b.y;
-      const d=Math.hypot(dx,dy);
-      if(d<a.r+b.r){
-        a.vx*=-1;
-        a.vy*=-1;
-        b.vx*=-1;
-        b.vy*=-1;
-        playSound();
+  // ---------- simulation ----------
+  let paused = false;
+  pauseBtn.addEventListener("click", ()=>{
+    paused = !paused;
+    pauseBtn.textContent = paused ? "Resume" : "Pause";
+  });
+
+  resetBtn.addEventListener("click", ()=>{
+    circles.length = 0;
+  });
+
+  const circles = [];
+  function rand(min,max){ return min + Math.random()*(max-min); }
+
+  function addCircle(){
+    const r = rand(18*dpr, 42*dpr);
+    circles.push({
+      x: rand(r, canvas.width - r),
+      y: rand(r, canvas.height - r),
+      r,
+      vx: rand(-1.2, 1.2) * dpr,
+      vy: rand(-1.2, 1.2) * dpr,
+    });
+  }
+
+  // keep population
+  function reseed(){
+    if(circles.length < minCircles){
+      const need = Math.min(10, Math.ceil((minCircles - circles.length) * seedRate));
+      for(let i=0;i<need;i++) addCircle();
+    }
+  }
+
+  // ---------- POP flash ----------
+  let popFlash = 0;
+  let popX = 0, popY = 0;
+
+  function drawPop(){
+    if(popFlash <= 0) return;
+    const a = popFlash;
+    const R = (90*dpr) + (220*dpr)*(1-a);
+    ctx.save();
+    ctx.globalCompositeOperation = "screen";
+    const grad = ctx.createRadialGradient(popX,popY,0,popX,popY,R);
+    grad.addColorStop(0, `rgba(255,255,255,${0.95*a})`);
+    grad.addColorStop(0.35, `rgba(255,255,210,${0.75*a})`);
+    grad.addColorStop(1, "rgba(255,255,210,0)");
+    ctx.fillStyle = grad;
+    ctx.beginPath(); ctx.arc(popX,popY,R,0,Math.PI*2); ctx.fill();
+    ctx.lineWidth = 10*dpr;
+    ctx.strokeStyle = `rgba(255,255,255,${0.65*a})`;
+    ctx.beginPath(); ctx.arc(popX,popY,R*0.62,0,Math.PI*2); ctx.stroke();
+    ctx.restore();
+    popFlash = Math.max(0, popFlash - 0.06);
+  }
+
+  // ---------- collisions ----------
+  function step(){
+    if(paused) return;
+
+    reseed();
+
+    for(const c of circles){
+      c.x += c.vx * speedMul;
+      c.y += c.vy * speedMul;
+
+      if(c.x - c.r < 0){ c.x = c.r; c.vx *= -1; }
+      if(c.x + c.r > canvas.width){ c.x = canvas.width - c.r; c.vx *= -1; }
+      if(c.y - c.r < 0){ c.y = c.r; c.vy *= -1; }
+      if(c.y + c.r > canvas.height){ c.y = canvas.height - c.r; c.vy *= -1; }
+    }
+
+    // simple bounce response
+    for(let i=0;i<circles.length;i++){
+      for(let j=i+1;j<circles.length;j++){
+        const a = circles[i], b = circles[j];
+        const dx = b.x - a.x, dy = b.y - a.y;
+        const dist = Math.hypot(dx,dy);
+        const minD = a.r + b.r;
+        if(dist > 0 && dist < minD){
+          // push apart
+          const overlap = (minD - dist);
+          const nx = dx/dist, ny = dy/dist;
+          a.x -= nx * overlap * 0.5;
+          a.y -= ny * overlap * 0.5;
+          b.x += nx * overlap * 0.5;
+          b.y += ny * overlap * 0.5;
+
+          // swap-ish velocities (quick and lively)
+          const tmpx = a.vx; a.vx = b.vx; b.vx = tmpx;
+          const tmpy = a.vy; a.vy = b.vy; b.vy = tmpy;
+
+          playCollision();
+        }
       }
     }
   }
-}
 
-function draw(){
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-  circles.forEach(c=>{
-    ctx.beginPath();
-    ctx.arc(c.x,c.y,c.r,0,Math.PI*2);
-    ctx.fillStyle="#e74c3c";
-    ctx.fill();
-  });
-}
+  function draw(){
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    ctx.fillStyle = "#000";
+    ctx.fillRect(0,0,canvas.width,canvas.height);
 
-function loop(){
-  update();
-  draw();
-  requestAnimationFrame(loop);
-}
-loop();
+    // circles topmost
+    ctx.fillStyle = "#d85a4a";
+    for(const c of circles){
+      ctx.beginPath();
+      ctx.arc(c.x,c.y,c.r,0,Math.PI*2);
+      ctx.fill();
+    }
 
-document.getElementById("soundBtn").onclick=()=>{
-  soundOn=!soundOn;
-  document.getElementById("soundBtn").textContent=soundOn?"Sound On":"Sound Off";
-};
-
-document.getElementById("resetBtn").onclick=()=>{
-  circles=[];
-};
-
-document.getElementById("pauseBtn").onclick=()=>{
-  paused=!paused;
-};
-
-document.getElementById("minRange").oninput=e=>{
-  minCircles=parseInt(e.target.value);
-};
-
-document.getElementById("seedRange").oninput=e=>{
-  seedRate=parseFloat(e.target.value);
-};
-
-let lastTap=0;
-canvas.addEventListener("touchend",e=>{
-  const now=Date.now();
-  if(now-lastTap<300){
-    const panel=document.getElementById("panel");
-    panel.style.display=panel.style.display==="none"?"block":"none";
+    drawPop();
   }
-  lastTap=now;
-});
-</script>
-</body>
-</html>
+
+  // ---------- tap handling: single pop, double toggles panel ----------
+  let lastTapTime = 0;
+
+  function getClientXY(e){
+    if(e && typeof e.clientX === "number") return {cx:e.clientX, cy:e.clientY};
+    const t = (e.touches && e.touches[0]) || (e.changedTouches && e.changedTouches[0]);
+    if(t) return {cx:t.clientX, cy:t.clientY};
+    return {cx:NaN, cy:NaN};
+  }
+
+  function popNearest(px,py){
+    if(circles.length === 0) return false;
+    let best = -1, bestD2 = Infinity;
+
+    for(let i=0;i<circles.length;i++){
+      const c = circles[i];
+      const dx = px - c.x, dy = py - c.y;
+      const d2 = dx*dx + dy*dy;
+      if(d2 < best
