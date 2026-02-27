@@ -6,7 +6,7 @@
 <title>Number Collisions: Color Field + Sound Styles</title>
 <style>
 html,body{margin:0;height:100%;background:#0b0f14;overflow:hidden;font-family:-apple-system,system-ui;}
-canvas{display:block;touch-action:none;}
+canvas{display:block;touch-action:manipulation;}
 #panel{
  position:fixed;top:12px;left:12px;right:12px;
  background:rgba(0,0,0,.55); color:#fff;
@@ -44,6 +44,12 @@ input[type=range]{width:min(360px,55vw)}
     <button id="pause">Pause</button>
   </div>
 
+  <div class="row">
+    <label>Volume</label>
+    <input id="sfxVol" type="range" min="0" max="1" step="0.01" value="0.85">
+    <div class="val" id="sfxVolOut">0.85</div>
+  </div>
+
   <div class="small">
     Collision: sound + both +1, then division (L→q, remainder r spawns). Auto-reseed keeps population above minimum.
     <br>Double‑tap anywhere to hide/show this panel (sliders/buttons still work).
@@ -60,8 +66,18 @@ input[type=range]{width:min(360px,55vw)}
     <input id="seedRate" type="range" min="0.2" max="6.0" step="0.1" value="1.2">
     <div class="val" id="seedOut">1.2</div>
   </div>
-</div>
-</div>
+
+  <div class="row">
+    <label>Overlay</label>
+    <input id="opac" type="range" min="0" max="0.98" step="0.01" value="0.88">
+    <div class="val" id="opacOut">0.88</div>
+  </div>
+
+  <div class="row">
+    <label>Hue</label>
+    <input id="hue" type="range" min="0" max="360" step="1" value="200">
+    <div class="val" id="hueOut">200</div>
+  </div>
 </div>
 
 <script>
@@ -81,6 +97,50 @@ resize();
 
 function rand(a,b){ return a + Math.random()*(b-a); }
 function clamp(x,a,b){ return Math.max(a, Math.min(b,x)); }
+
+/* ---------- overlay color field ---------- */
+const overlay = {
+  r:40,g:50,b:65,
+  tr:40,tg:50,tb:65,
+  br:40,bg:50,bb:65,
+  a:0.88, lerp:0.12, basePull:0.02
+};
+
+function hslToRgb(h,s,l){
+  h=((h%360)+360)%360;
+  const c=(1-Math.abs(2*l-1))*s;
+  const x=c*(1-Math.abs(((h/60)%2)-1));
+  const m=l-c/2;
+  let r1=0,g1=0,b1=0;
+  if(h<60){r1=c;g1=x;}
+  else if(h<120){r1=x;g1=c;}
+  else if(h<180){g1=c;b1=x;}
+  else if(h<240){g1=x;b1=c;}
+  else if(h<300){r1=x;b1=c;}
+  else {r1=c;b1=x;}
+  return {r:Math.round((r1+m)*255),g:Math.round((g1+m)*255),b:Math.round((b1+m)*255)};
+}
+
+const hueEl = document.getElementById("hue");
+function setOverlayBaseFromHue(){
+  const baseHue = parseFloat(hueEl.value);
+  const base = hslToRgb(baseHue, 0.55, 0.62);
+  overlay.br=base.r; overlay.bg=base.g; overlay.bb=base.b;
+  overlay.tr=overlay.br; overlay.tg=overlay.bg; overlay.tb=overlay.bb;
+}
+
+function pickVividNearHue(baseHue){
+  const h = (baseHue + (Math.random()*70 - 35) + 360) % 360;
+  const s = 0.78 + Math.random()*0.18;
+  const l = 0.52 + Math.random()*0.18;
+  return hslToRgb(h,s,l);
+}
+
+function bumpOverlayColor(){
+  const baseHue = parseFloat(hueEl.value);
+  const c = pickVividNearHue(baseHue);
+  overlay.tr=c.r; overlay.tg=c.g; overlay.tb=c.b;
+}
 
 /* ---------- audio + sound styles ---------- */
 let ac=null, master=null, audioOn=false;
@@ -134,6 +194,96 @@ function ensureAudio(){
     o.connect(g); g.connect(master);
     o.start(); o.stop(ac.currentTime+0.09);
   }
+
+// ---- REAL SFX via WebAudio (decoded buffers) ----
+const SFX_URLS = {
+  piano: ["assets/sfx/Piano1.mp3"],
+  laugh: ["assets/sfx/Laughter2.mp3"],
+  bark:  ["assets/sfx/DogBark2.mp3"],
+  meow:  ["assets/sfx/CatMeaw1.mp3"],
+  roar:  ["assets/sfx/LionRoar.mp3"]
+};
+
+let sfxLoaded = false;
+const sfxBuffers = {}; // key -> AudioBuffer[]
+let masterGain = null;
+let compressor = null;
+
+function initMasterChain(){
+  if(masterGain) return;
+  masterGain = ac.createGain();
+  masterGain.gain.value = 0.85;
+
+  compressor = ac.createDynamicsCompressor();
+  compressor.threshold.value = -18;
+  compressor.knee.value = 22;
+  compressor.ratio.value = 3.5;
+  compressor.attack.value = 0.006;
+  compressor.release.value = 0.18;
+
+  masterGain.connect(compressor);
+  compressor.connect(ac.destination);
+}
+
+async function loadOne(url){
+  const res = await fetch(url, { cache: "force-cache" });
+  if(!res.ok) throw new Error(`Fetch failed ${res.status}: ${url}`);
+  const arr = await res.arrayBuffer();
+  return await ac.decodeAudioData(arr);
+}
+
+async function loadAllSfx(){
+  if(sfxLoaded) return;
+  ensureAudio();
+  initMasterChain();
+  sfxLoaded = true;
+
+  for(const [key, list] of Object.entries(SFX_URLS)){
+    sfxBuffers[key] = [];
+    for(const url of list){
+      try{
+        sfxBuffers[key].push(await loadOne(url));
+      }catch(e){
+        console.warn("SFX load failed:", url, e);
+      }
+    }
+  }
+}
+
+let activeVoices = 0;
+const MAX_VOICES = 10;
+
+function playSample(key, impact=0.6, xNorm=0.5){
+  if(!audioOn || !ac) return;
+  const list = sfxBuffers[key];
+  if(!list || list.length === 0) return;
+  if(activeVoices >= MAX_VOICES) return;
+
+  const buf = list[(Math.random()*list.length)|0];
+  const src = ac.createBufferSource();
+  src.buffer = buf;
+  src.playbackRate.value = 0.95 + Math.random()*0.10;
+
+  const g = ac.createGain();
+  const base = (typeof sfxVolume === "number") ? sfxVolume : 0.85;
+  const vol = Math.min(1, (0.20 + impact*0.90) * base);
+  g.gain.value = vol;
+
+  let last = g;
+  if(ac.createStereoPanner){
+    const p = ac.createStereoPanner();
+    p.pan.value = Math.max(-1, Math.min(1, (xNorm*2-1)));
+    g.connect(p);
+    last = p;
+  }
+
+  src.connect(g);
+  last.connect(masterGain);
+
+  activeVoices++;
+  src.onended = ()=>{ activeVoices = Math.max(0, activeVoices-1); };
+  src.start();
+}
   return ac;
 }
 
@@ -360,25 +510,21 @@ function playLaugh(ctx, now, freq, amp){
   }
 }
 
-function playHit(a,b,impact){
+function playHit(a,b,impact, hitXNorm=0.5){
   if(!audioOn) return;
+  const nA=a.n||0, nB=b.n||0;
+  const amp=Math.min(1, 0.55 + (impact||0)*0.35);
+  if(soundStyle && soundStyle !== "synth"){
+    if(!sfxLoaded){ loadAllSfx().catch(()=>{}); }
+    playSample(soundStyle, amp, hitXNorm);
+    return;
+  }
+  // synth fallback
   const ctxA = ensureAudio(); if(!ctxA) return;
   const now = ctxA.currentTime;
-  const nA=a.n||0, nB=b.n||0;
+  const freq=140 + ((nA*3+nB*5)%60)*10;
+  playSynth(ctxA, now, freq, amp);
 
-  // Map numbers to frequency; impact to loudness
-  const amp=Math.min(1, 0.60 + (impact||0)*0.40);
-  const freq=140 + ((nA*3+nB*5)%60)*10; // ~140..740
-  // If using real samples, play them; otherwise fall back to synth.
-  const impact01 = Math.max(0, Math.min(1, impact||0));
-  switch(soundStyle){
-    case "piano": playSample("piano", impact01); break;
-    case "laugh": playSample("laugh", impact01); break;
-    case "bark":  playSample("bark",  impact01); break;
-    case "meow":  playSample("meow",  impact01); break;
-    case "roar":  playSample("roar",  impact01); break;
-    default:      playSynth(ctxA, now, freq, amp); break;
-  }
 }
 
 /* ---------- circles + division ecosystem ---------- */
@@ -483,28 +629,42 @@ function resolve(a,b,nowS){
   updatePhysical(a); updatePhysical(b);
 
   const impact=Math.min(1, Math.abs(velAlong)/(280*dpr));
-  playHit(a,b,impact);
-applyDivision(a,b,nx,ny,nowS);
+  const hitXNorm = ((a.x + b.x) * 0.5) / W;
+  playHit(a,b,impact, hitXNorm);
+  bumpOverlayColor();
+
+  applyDivision(a,b,nx,ny,nowS);
 }
 
 /* ---------- UI ---------- */
 const minEl=document.getElementById("minCircles");
 const seedEl=document.getElementById("seedRate");
+const opacEl=document.getElementById("opac");
 const minOut=document.getElementById("minOut");
 const seedOut=document.getElementById("seedOut");
+const opacOut=document.getElementById("opacOut");
+const hueOut=document.getElementById("hueOut");
 const pauseBtn=document.getElementById("pause");
 const resetBtn=document.getElementById("reset");
 const soundBtn=document.getElementById("soundBtn");
 const styleSel=document.getElementById("soundStyle");
 const testBtn=document.getElementById("testSound");
+const sfxVolEl=document.getElementById("sfxVol");
+const sfxVolOut=document.getElementById("sfxVolOut");
 
 function updUI(){
   minOut.textContent=minEl.value;
-  seedOut.textContent=seedEl.value;}
+  seedOut.textContent=seedEl.value;
+  opacOut.textContent=parseFloat(opacEl.value).toFixed(2);
+  hueOut.textContent=hueEl.value;
+  if(sfxVolOut && sfxVolEl){ sfxVolOut.textContent = parseFloat(sfxVolEl.value).toFixed(2); }
+}
 minEl.addEventListener("input", updUI);
 seedEl.addEventListener("input", updUI);
-updUI(); });
-updUI(); });
+opacEl.addEventListener("input", ()=>{ overlay.a=parseFloat(opacEl.value); updUI(); });
+hueEl.addEventListener("input", ()=>{ setOverlayBaseFromHue(); updUI(); });
+overlay.a=parseFloat(opacEl.value);
+setOverlayBaseFromHue();
 updUI();
 
 // sound style persistence
@@ -513,9 +673,15 @@ try{
   if(savedStyle){ soundStyle=savedStyle; styleSel.value=savedStyle; }
 }catch(e){}
 styleSel.addEventListener("change", ()=>{
+  // (style change)
+
   soundStyle=styleSel.value;
   try{ localStorage.setItem(STORAGE_SOUND_STYLE, soundStyle); }catch(e){}
 });
+
+if(sfxVolEl){
+  sfxVolEl.addEventListener("input", ()=>{ sfxVolume = parseFloat(sfxVolEl.value); updUI(); });
+}
 
 soundBtn.onclick = async ()=>{
   const ctxA=ensureAudio();
@@ -607,6 +773,14 @@ function loop(t){
   ctx.fillStyle="#0b0f14";
   ctx.fillRect(0,0,W,H);
 
+  // drift target back toward base, then ease current toward target
+  overlay.tr += (overlay.br - overlay.tr) * overlay.basePull;
+  overlay.tg += (overlay.bg - overlay.tg) * overlay.basePull;
+  overlay.tb += (overlay.bb - overlay.tb) * overlay.basePull;
+  overlay.r += (overlay.tr - overlay.r) * overlay.lerp;
+  overlay.g += (overlay.tg - overlay.g) * overlay.lerp;
+  overlay.b += (overlay.tb - overlay.b) * overlay.lerp;
+
   // draw circles (under overlay)
   ctx.textAlign="center";
   ctx.textBaseline="middle";
@@ -619,6 +793,10 @@ function loop(t){
     ctx.font=`${Math.max(12*dpr,c.r*0.7)}px sans-serif`;
     ctx.fillText(c.n,c.x,c.y);
   }
+
+  // overlay on top
+  ctx.fillStyle = `rgba(${Math.round(overlay.r)},${Math.round(overlay.g)},${Math.round(overlay.b)},${overlay.a})`;
+  ctx.fillRect(0,0,W,H);
 
   requestAnimationFrame(loop);
 }
