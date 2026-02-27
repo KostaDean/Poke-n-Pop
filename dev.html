@@ -2,21 +2,19 @@
 <html>
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>Screamsaver (Safe Upload)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Screamsaver Bounce + Sound</title>
 <style>
 html,body{margin:0;height:100%;background:#000;overflow:hidden;font-family:system-ui}
 canvas{display:block;width:100vw;height:100vh;touch-action:none}
 #panel{
-  position:fixed;top:14px;left:14px;right:14px;
-  background:rgba(20,20,22,.9);color:#fff;border-radius:16px;padding:12px;
-  box-shadow:0 20px 60px rgba(0,0,0,.55);
-  -webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);
-  user-select:none
+ position:fixed;top:14px;left:14px;right:14px;
+ background:rgba(20,20,22,.9);color:#fff;border-radius:16px;padding:12px;
+ box-shadow:0 20px 60px rgba(0,0,0,.55);
 }
 button{font-size:18px;border-radius:14px;padding:8px 14px;margin:4px;
-  border:1px solid rgba(255,255,255,.35);background:rgba(255,255,255,.10);color:#fff}
-.hint{font-size:14px;opacity:.85;margin-top:6px;line-height:1.25}
+ border:1px solid rgba(255,255,255,.35);
+ background:rgba(255,255,255,.10);color:#fff}
 </style>
 </head>
 <body>
@@ -24,181 +22,157 @@ button{font-size:18px;border-radius:14px;padding:8px 14px;margin:4px;
 <canvas id="c"></canvas>
 
 <div id="panel">
-  <button id="reset">Reset</button>
-  <button id="pause">Pause</button>
-  <button id="sound">Sound On</button>
-  <div class="hint">Single tap a circle to POP (delete + flash + pop).<br>Double tap anywhere to hide/show this panel.</div>
+<button id="reset">Reset</button>
+<button id="sound">Sound On</button>
+<p>Single tap = POP<br>Double tap = toggle panel</p>
 </div>
 
 <script>
-(() => {
-  const canvas = document.getElementById("c");
-  const ctx = canvas.getContext("2d");
-  const panel = document.getElementById("panel");
+const canvas=document.getElementById("c");
+const ctx=canvas.getContext("2d");
+const panel=document.getElementById("panel");
 
-  let dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
-  function resize(){
-    dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
-    canvas.width = Math.floor(innerWidth * dpr);
-    canvas.height = Math.floor(innerHeight * dpr);
-    canvas.style.width = innerWidth + "px";
-    canvas.style.height = innerHeight + "px";
-  }
-  addEventListener("resize", resize, {passive:true});
-  resize();
+let dpr=window.devicePixelRatio||1;
+function resize(){
+ canvas.width=innerWidth*dpr;
+ canvas.height=innerHeight*dpr;
+ canvas.style.width=innerWidth+"px";
+ canvas.style.height=innerHeight+"px";
+}
+resize();
+addEventListener("resize",resize);
 
-  // stop panel taps from triggering pop/toggle
-  ["pointerdown","touchstart","mousedown","click"].forEach(ev=>{
-    panel.addEventListener(ev, e=>e.stopPropagation(), {passive:false});
+// audio
+let audioOn=true;
+let ac=null;
+function ensureAudio(){
+ if(!audioOn) return;
+ if(!ac) ac=new (window.AudioContext||window.webkitAudioContext)();
+ if(ac.state==="suspended") ac.resume();
+}
+function blip(freq=220,vol=0.3,dur=0.08){
+ if(!audioOn) return;
+ ensureAudio();
+ const o=ac.createOscillator();
+ const g=ac.createGain();
+ o.frequency.value=freq;
+ o.type="sine";
+ g.gain.value=vol;
+ o.connect(g);g.connect(ac.destination);
+ o.start();
+ o.stop(ac.currentTime+dur);
+}
+
+let circles=[];
+function seed(n=18){
+ circles=[];
+ for(let i=0;i<n;i++){
+  circles.push({
+   x:Math.random()*canvas.width,
+   y:Math.random()*canvas.height,
+   r:20*dpr+Math.random()*25*dpr,
+   vx:(Math.random()-0.5)*2*dpr,
+   vy:(Math.random()-0.5)*2*dpr
   });
+ }
+}
+seed();
 
-  // audio pop (simple, iOS-safe)
-  let audioOn = true;
-  let ac = null, master = null;
-  function ensureAudio(){
-    if(!audioOn) return null;
-    if(!ac){
-      ac = new (window.AudioContext || window.webkitAudioContext)();
-      master = ac.createGain();
-      master.gain.value = 0.9;
-      master.connect(ac.destination);
-    }
-    if(ac.state === "suspended"){ try{ ac.resume(); }catch(e){} }
-    return ac;
+function collide(a,b){
+ const dx=b.x-a.x;
+ const dy=b.y-a.y;
+ const dist=Math.hypot(dx,dy);
+ if(dist<a.r+b.r){
+  const angle=Math.atan2(dy,dx);
+  const overlap=a.r+b.r-dist;
+  const ax=Math.cos(angle)*overlap/2;
+  const ay=Math.sin(angle)*overlap/2;
+  a.x-=ax; a.y-=ay;
+  b.x+=ax; b.y+=ay;
+  const tmpVx=a.vx; const tmpVy=a.vy;
+  a.vx=b.vx; a.vy=b.vy;
+  b.vx=tmpVx; b.vy=tmpVy;
+  blip(180+Math.random()*200,0.15,0.05);
+ }
+}
+
+let flash=0,fx=0,fy=0;
+function drawFlash(){
+ if(flash<=0) return;
+ ctx.save();
+ ctx.globalCompositeOperation="screen";
+ const g=ctx.createRadialGradient(fx,fy,0,fx,fy,150*dpr);
+ g.addColorStop(0,"rgba(255,255,255,"+flash+")");
+ g.addColorStop(1,"rgba(255,255,255,0)");
+ ctx.fillStyle=g;
+ ctx.beginPath();
+ ctx.arc(fx,fy,150*dpr,0,Math.PI*2);
+ ctx.fill();
+ ctx.restore();
+ flash-=0.05;
+}
+
+function loop(){
+ ctx.fillStyle="#000";
+ ctx.fillRect(0,0,canvas.width,canvas.height);
+
+ for(let c of circles){
+  c.x+=c.vx;
+  c.y+=c.vy;
+  if(c.x-c.r<0||c.x+c.r>canvas.width) c.vx*=-1;
+  if(c.y-c.r<0||c.y+c.r>canvas.height) c.vy*=-1;
+ }
+
+ for(let i=0;i<circles.length;i++){
+  for(let j=i+1;j<circles.length;j++){
+   collide(circles[i],circles[j]);
   }
-  function popSound(){
-    if(!audioOn) return;
-    const A = ensureAudio(); if(!A) return;
-    const t = A.currentTime;
-    const dur = 0.06, sr = A.sampleRate;
-    const buf = A.createBuffer(1, Math.floor(sr*dur), sr);
-    const data = buf.getChannelData(0);
-    for(let i=0;i<data.length;i++){
-      const x = i/data.length;
-      data[i] = (Math.random()*2-1) * Math.pow(1-x, 2.6);
-    }
-    const src = A.createBufferSource(); src.buffer = buf;
-    const g = A.createGain();
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(0.95, t+0.01);
-    g.gain.exponentialRampToValueAtTime(0.0001, t+0.09);
-    src.connect(g); g.connect(master);
-    src.start(t); src.stop(t+dur);
+ }
+
+ ctx.fillStyle="#d85a4a";
+ for(let c of circles){
+  ctx.beginPath();
+  ctx.arc(c.x,c.y,c.r,0,Math.PI*2);
+  ctx.fill();
+ }
+
+ drawFlash();
+ requestAnimationFrame(loop);
+}
+loop();
+
+let lastTap=0;
+canvas.addEventListener("pointerdown",e=>{
+ const now=Date.now();
+ if(now-lastTap<300){
+  panel.style.display=panel.style.display==="none"?"block":"none";
+  lastTap=0;
+  return;
+ }
+ lastTap=now;
+
+ const rect=canvas.getBoundingClientRect();
+ const x=(e.clientX-rect.left)*dpr;
+ const y=(e.clientY-rect.top)*dpr;
+
+ for(let i=circles.length-1;i>=0;i--){
+  const c=circles[i];
+  const dx=x-c.x,dy=y-c.y;
+  if(dx*dx+dy*dy<c.r*c.r){
+   circles.splice(i,1);
+   fx=c.x;fy=c.y;flash=1;
+   blip(80,0.6,0.15);
+   break;
   }
+ }
+},{passive:false});
 
-  // circles
-  const circles = [];
-  function rand(a,b){ return a + Math.random()*(b-a); }
-  function seed(n){
-    circles.length = 0;
-    for(let i=0;i<n;i++){
-      const r = rand(18*dpr, 44*dpr);
-      circles.push({
-        x: rand(r, canvas.width-r),
-        y: rand(r, canvas.height-r),
-        r,
-        vx: rand(-1.3,1.3)*dpr,
-        vy: rand(-1.3,1.3)*dpr
-      });
-    }
-  }
-  seed(24);
-
-  let paused = false;
-
-  // flash
-  let flash = 0, fx = 0, fy = 0;
-  function drawFlash(){
-    if(flash<=0) return;
-    const a = flash;
-    const R = (70*dpr)+(210*dpr)*(1-a);
-    ctx.save();
-    ctx.globalCompositeOperation = "screen";
-    const g = ctx.createRadialGradient(fx,fy,0,fx,fy,R);
-    g.addColorStop(0, `rgba(255,255,255,${0.95*a})`);
-    g.addColorStop(0.35, `rgba(255,255,210,${0.70*a})`);
-    g.addColorStop(1, "rgba(255,255,210,0)");
-    ctx.fillStyle = g;
-    ctx.beginPath(); ctx.arc(fx,fy,R,0,Math.PI*2); ctx.fill();
-    ctx.restore();
-    flash = Math.max(0, flash-0.06);
-  }
-
-  function step(){
-    if(paused) return;
-    for(const c of circles){
-      c.x += c.vx;
-      c.y += c.vy;
-      if(c.x-c.r<0){c.x=c.r;c.vx*=-1}
-      if(c.x+c.r>canvas.width){c.x=canvas.width-c.r;c.vx*=-1}
-      if(c.y-c.r<0){c.y=c.r;c.vy*=-1}
-      if(c.y+c.r>canvas.height){c.y=canvas.height-c.r;c.vy*=-1}
-    }
-  }
-
-  function draw(){
-    ctx.fillStyle = "#000";
-    ctx.fillRect(0,0,canvas.width,canvas.height);
-    ctx.fillStyle = "#d85a4a";
-    for(const c of circles){
-      ctx.beginPath();
-      ctx.arc(c.x,c.y,c.r,0,Math.PI*2);
-      ctx.fill();
-    }
-    drawFlash();
-  }
-
-  function loop(){
-    step();
-    draw();
-    requestAnimationFrame(loop);
-  }
-  requestAnimationFrame(loop);
-
-  // tap: single pops, double toggles panel
-  let lastTap = 0;
-  function onTap(e){
-    const now = Date.now();
-    const dbl = (now - lastTap) < 320;
-    lastTap = dbl ? 0 : now;
-
-    if(dbl){
-      panel.style.display = (panel.style.display==="none") ? "block" : "none";
-      return;
-    }
-
-    const rect = canvas.getBoundingClientRect();
-    const cx = (typeof e.clientX==="number") ? e.clientX : (e.touches && e.touches[0] ? e.touches[0].clientX : NaN);
-    const cy = (typeof e.clientY==="number") ? e.clientY : (e.touches && e.touches[0] ? e.touches[0].clientY : NaN);
-    const x = (cx - rect.left) * dpr;
-    const y = (cy - rect.top) * dpr;
-
-    for(let i=circles.length-1;i>=0;i--){
-      const c = circles[i];
-      const dx = x - c.x, dy = y - c.y;
-      const rr = c.r + 18*dpr; // padding for easy tapping
-      if(dx*dx + dy*dy <= rr*rr){
-        circles.splice(i,1);
-        fx = c.x; fy = c.y; flash = 1.0;
-        popSound();
-        e.preventDefault();
-        break;
-      }
-    }
-  }
-  canvas.addEventListener("pointerdown", onTap, {passive:false});
-  canvas.addEventListener("touchstart", onTap, {passive:false});
-  canvas.addEventListener("mousedown", onTap, {passive:false});
-
-  document.getElementById("reset").onclick = () => seed(24);
-  document.getElementById("pause").onclick = () => { paused = !paused; };
-  document.getElementById("sound").onclick = () => {
-    audioOn = !audioOn;
-    document.getElementById("sound").textContent = audioOn ? "Sound On" : "Sound Off";
-    if(audioOn) ensureAudio();
-  };
-})();
+document.getElementById("reset").onclick=()=>seed();
+document.getElementById("sound").onclick=()=>{
+ audioOn=!audioOn;
+ document.getElementById("sound").textContent=audioOn?"Sound On":"Sound Off";
+ if(audioOn) ensureAudio();
+};
 </script>
-
 </body>
 </html>
