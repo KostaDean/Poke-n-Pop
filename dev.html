@@ -57,8 +57,8 @@ input[type=range]{width:min(360px,55vw)}
 
   <div class="row">
     <label>Min circles</label>
-    <input id="minCircles" type="range" min="5" max="120" step="1" value="12">
-    <div class="val" id="minOut">12</div>
+    <input id="minCircles" type="range" min="10" max="140" step="1" value="30">
+    <div class="val" id="minOut">30</div>
   </div>
 
   <div class="row">
@@ -105,11 +105,6 @@ const overlay = {
   br:40,bg:50,bb:65,
   a:0.88, lerp:0.12, basePull:0.02
 };
-
-// --- pop effect ---
-let popFlash = 0;
-let popX = 0, popY = 0;
-
 
 function hslToRgb(h,s,l){
   h=((h%360)+360)%360;
@@ -350,35 +345,6 @@ function envGain(g, now, peak, attack=0.004, release=0.16){
   g.gain.setValueAtTime(0.0001, now);
   g.gain.exponentialRampToValueAtTime(Math.max(0.0002, peak), now+attack);
   g.gain.exponentialRampToValueAtTime(0.0001, now+Math.max(0.03, release));
-}
-
-function playPop(impact=1.0){
-  if(!audioOn) return;
-  const ctxA = ensureAudio();
-  if(!ctxA) return;
-  if(ac && ac.state==='suspended'){ try{ ac.resume(); }catch(e){} }
-  try{ if(!sfxLoaded){ loadAllSfx(); } }catch(e){}
-  try{ if(!sfxLoaded){ loadAllSfx().catch(()=>{}); } }catch(e){}
-  const now = ctxA.currentTime;
-
-  // Use bark sample if loaded (punchy), otherwise synth pop
-  if(sfxLoaded && sfxBuffers && sfxBuffers.bark && sfxBuffers.bark.length){
-    playSample("bark", Math.min(1, 1.2*impact+0.4), 0.5);
-    return;
-  }
-
-  // Noise click
-  noiseBurst(ctxA, now, 0.040, 0.55*Math.min(1,impact), 500, 2600, 4);
-
-  // Low thump
-  const o = ctxA.createOscillator();
-  const g = ctxA.createGain();
-  o.type="sine";
-  o.frequency.setValueAtTime(120, now);
-  o.frequency.exponentialRampToValueAtTime(60, now+0.10);
-  envGain(g, now, 0.55*Math.min(1,impact), 0.003, 0.14);
-  o.connect(g); g.connect(masterGain || ctxA.destination);
-  o.start(now); o.stop(now+0.14);
 }
 
 function noiseBurst(ctx, now, dur, peak, hp=150, bp=900, q=6){
@@ -721,9 +687,9 @@ soundBtn.onclick = async ()=>{
   const ctxA=ensureAudio();
   if(!ctxA) return;
   if(!audioOn){
-    if(ac && ac.state==="suspended") ac.resume();
+    if(ac && ac.state==="suspended") await ac.resume();
     audioOn=true; soundBtn.textContent="Sound Off";
-    try{ loadAllSfx(); }catch(e){ console.warn(e); }
+    try{ await loadAllSfx(); }catch(e){ console.warn(e); }
   }else{
     if(ac && ac.state==="running") await ac.suspend();
     audioOn=false; soundBtn.textContent="Sound On";
@@ -733,9 +699,9 @@ soundBtn.onclick = async ()=>{
 testBtn.onclick = async ()=>{
   const ctxA=ensureAudio();
   if(!ctxA) return;
-  if(ac && ac.state==="suspended") ac.resume();
+  if(ac && ac.state==="suspended") await ac.resume();
   audioOn=true; soundBtn.textContent="Sound Off";
-    try{ loadAllSfx(); }catch(e){ console.warn(e); }
+    try{ await loadAllSfx(); }catch(e){ console.warn(e); }
   playHit({n:123},{n:77},1.0);
 };
 
@@ -756,70 +722,10 @@ init();
 /* ---------- double-tap toggle panel ---------- */
 const panelEl=document.getElementById("panel");
 let lastTap=0;
-let lastPointerDown=0;
-
-function getClientXY(e){
-  // Supports PointerEvent, MouseEvent, TouchEvent
-  if(e && typeof e.clientX === "number" && typeof e.clientY === "number"){
-    return {cx:e.clientX, cy:e.clientY};
-  }
-  const t = (e && e.touches && e.touches[0]) || (e && e.changedTouches && e.changedTouches[0]);
-  if(t) return {cx:t.clientX, cy:t.clientY};
-  return {cx:NaN, cy:NaN};
-}
-
 function isControlTarget(t){ return !!(t && t.closest && t.closest("#panel button, #panel input, #panel select, #panel textarea")); }
 function tapHandler(e){
   if(isControlTarget(e.target)) return;
-  // ignore synthetic duplicate events (iOS often fires pointerdown + touchstart)
-  const tNow = Date.now();
-  if(e.type === 'pointerdown') lastPointerDown = tNow;
-  if(e.type === 'touchstart' && (tNow - lastPointerDown) < 500) return;
-  /* pop circle on tap */
-  // Map screen coords -> canvas coords
-  const rect = canvas.getBoundingClientRect();
-  const {cx,cy} = getClientXY(e);
-  const px = (cx - rect.left) * dpr;
-  const py = (cy - rect.top) * dpr;
-  if(!isFinite(px) || !isFinite(py)) return;
-
-  // Always show a small tap flash (so you know taps are detected)
-  popFlash = Math.max(popFlash, 0.55);
-  popX = px; popY = py;
-
-  // Find the nearest circle (overlay makes it hard to tap exactly)
-  let bestI = -1;
-  let bestD2 = Infinity;
-  for(let i=0;i<circles.length;i++){
-    const c = circles[i];
-    const dx = px - c.x, dy = py - c.y;
-    const d2 = dx*dx + dy*dy;
-    if(d2 < bestD2){
-      bestD2 = d2;
-      bestI = i;
-    }
-  }
-
-  if(bestI !== -1){
-    const c = circles[bestI];
-    const rr = (c.r + 70*dpr); // generous touch radius
-    if(bestD2 <= rr*rr){
-      e.preventDefault();
-
-      // Big flash at the circle center
-      popFlash = 1.0;
-      popX = c.x; popY = c.y;
-
-      // Remove circle
-      circles.splice(bestI, 1);
-
-      // Loud pop sound (requires Sound On)
-      playPop(1.3);
-      return; // don't toggle panel
-    }
-  }
-
-const now=Date.now();
+  const now=Date.now();
   if(now-lastTap<320){
     panelEl.style.display = (panelEl.style.display==="none") ? "block" : "none";
     lastTap=0;
@@ -827,13 +733,8 @@ const now=Date.now();
     lastTap=now;
   }
 }
-// Canvas-based tap handler
-if(window.PointerEvent){
-  canvas.addEventListener("pointerdown", tapHandler, {passive:false});
-}else{
-  canvas.addEventListener("touchstart", tapHandler, {passive:false});
-  canvas.addEventListener("mousedown", tapHandler, {passive:false});
-}
+if(window.PointerEvent) window.addEventListener("pointerdown", tapHandler, {passive:true});
+else window.addEventListener("touchstart", tapHandler, {passive:true});
 
 /* ---------- main loop ---------- */
 let lastT=performance.now();
@@ -896,34 +797,6 @@ function loop(t){
   // overlay on top
   ctx.fillStyle = `rgba(${Math.round(overlay.r)},${Math.round(overlay.g)},${Math.round(overlay.b)},${overlay.a})`;
   ctx.fillRect(0,0,W,H);
-
-  // pop flash (on top)
-  if(popFlash > 0){
-    const a = popFlash;
-    const R = (90*dpr) + (240*dpr)*(1-a);
-    ctx.save();
-    ctx.globalAlpha = 1.0;                 // keep it bright
-    ctx.globalCompositeOperation = "screen";
-
-    const grad = ctx.createRadialGradient(popX,popY,0,popX,popY,R);
-    grad.addColorStop(0, `rgba(255,255,255,${0.95*a})`);
-    grad.addColorStop(0.35, `rgba(255,255,210,${0.85*a})`);
-    grad.addColorStop(1, "rgba(255,255,210,0)");
-
-    ctx.fillStyle = grad;
-    ctx.beginPath();
-    ctx.arc(popX, popY, R, 0, Math.PI*2);
-    ctx.fill();
-
-    ctx.lineWidth = 12*dpr;
-    ctx.strokeStyle = `rgba(255,255,255,${0.8*a})`;
-    ctx.beginPath();
-    ctx.arc(popX, popY, R*0.62, 0, Math.PI*2);
-    ctx.stroke();
-
-    ctx.restore();
-    popFlash = Math.max(0, popFlash - 0.028);
-  }
 
   requestAnimationFrame(loop);
 }
