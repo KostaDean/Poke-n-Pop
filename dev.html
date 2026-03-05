@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>Screamsaver — Lightning Pop + Sliders</title>
+<title>Screamsaver — Piglet Pop + Sliders</title>
 <style>
   html,body{margin:0;height:100%;background:#000;overflow:hidden;font-family:system-ui}
   canvas{display:block;width:100vw;height:100vh;touch-action:none}
@@ -61,9 +61,9 @@
   </div>
 
   <div class="hint">
-    • Single tap a circle to CAPTURE (squiggle), then it POPS or ESCAPES.<br>
-    • Double tap anywhere to hide/show this panel.<br>
-    • For real thunder + lightning image, add files (see note at bottom).
+    • Single tap a circle to CAPTURE (squiggle + oik‑oik), then it POPS or ESCAPES.<br>
+    • Double tap anywhere to hide/show this panel (single tap won’t toggle).<br>
+    • Purple puff is local (no screen flash).
   </div>
 </div>
 
@@ -133,6 +133,28 @@
     o.start(t); o.stop(t+dur+0.02);
   }
 
+  // --- Piglet-style "oink" synth (no external files) ---
+  function pigOink(vol=0.22, dur=0.12, f0=520){
+    if(!audioOn) return;
+    const A = ensureAudio(); if(!A) return;
+    const t = A.currentTime;
+    const o = A.createOscillator();
+    const g = A.createGain();
+    o.type = "triangle";
+    o.frequency.setValueAtTime(f0, t);
+    o.frequency.exponentialRampToValueAtTime(Math.max(95, f0*0.35), t+dur);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(Math.max(0.0002, vol), t+0.010);
+    g.gain.exponentialRampToValueAtTime(0.0001, t+dur);
+    o.connect(g); g.connect(master);
+    o.start(t); o.stop(t+dur+0.04);
+  }
+
+  function oikOik(){
+    pigOink(0.22, 0.10, 560);
+    setTimeout(()=>pigOink(0.18, 0.10, 430), 95);
+  }
+
   // Lightning-ish synth pop (fallback)
   function lightningPopSynth(){
     if(!audioOn) return;
@@ -176,7 +198,7 @@
   // purple haze "puff" particles (for POP)
   const puffs = []; // {x,y,r,life}
   function addPurplePuff(x,y,baseR){
-    puffs.push({ x, y, r: Math.max(10*dpr, baseR*0.9), life: 1.0 });
+    puffs.push({ x, y, r: Math.max(14*dpr, baseR*1.05), life: 1.0 });
   }
   function drawPurplePuffs(){
     if(!puffs.length) return;
@@ -187,57 +209,23 @@
       const a = p.life;
       const R = p.r * (1.0 + (1.8*(1-a)));
       const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, R);
-      g.addColorStop(0, `rgba(210,130,255,${0.55*a})`);
-      g.addColorStop(0.35, `rgba(170,70,255,${0.28*a})`);
+      g.addColorStop(0, `rgba(240,170,255,${0.78*a})`);
+      g.addColorStop(0.28, `rgba(200,80,255,${0.44*a})`);
+      g.addColorStop(0.62, `rgba(140,30,220,${0.16*a})`);
       g.addColorStop(1, "rgba(120,0,180,0)");
       ctx.fillStyle = g;
       ctx.beginPath();
       ctx.arc(p.x, p.y, R, 0, Math.PI*2);
       ctx.fill();
 
-      p.life -= 0.08;
+      p.life -= 0.075;
       if(p.life <= 0) puffs.splice(i,1);
     }
     ctx.restore();
   }
 
-  function drawLightning(){
-    // local radial flash
-    if(flash>0){
-      ctx.save();
-      ctx.globalCompositeOperation="screen";
-      const a=flash;
-      const R = (120*dpr) + (280*dpr)*(1-a);
-      const g = ctx.createRadialGradient(fx,fy,0,fx,fy,R);
-      g.addColorStop(0, `rgba(255,255,255,${0.95*a})`);
-      g.addColorStop(0.25, `rgba(200,230,255,${0.75*a})`);
-      g.addColorStop(1, "rgba(160,200,255,0)");
-      ctx.fillStyle=g;
-      ctx.beginPath(); ctx.arc(fx,fy,R,0,Math.PI*2); ctx.fill();
-      ctx.restore();
-
-      // optional image overlay
-      if(lightningImgReady){
-        const w = 220*dpr, h = 360*dpr;
-        ctx.save();
-        ctx.globalAlpha = Math.min(1, 0.85*a);
-        ctx.globalCompositeOperation="screen";
-        ctx.drawImage(lightningImg, fx - w/2, fy - h*0.75, w, h);
-        ctx.restore();
-      }
-      flash = Math.max(0, flash-0.10);
-    }
-
-    // global strobe (brief)
-    if(screenFlash>0){
-      ctx.save();
-      ctx.globalCompositeOperation="screen";
-      ctx.fillStyle = `rgba(255,255,255,${screenFlash})`;
-      ctx.fillRect(0,0,canvas.width,canvas.height);
-      ctx.restore();
-      screenFlash = Math.max(0, screenFlash-0.18);
-    }
-  }
+  // Screen-wide flash removed (user request). Keep as noop for now.
+  function drawLightning(){ /* no-op */ }
 
   // ---------------- Controls ----------------
   const speedEl = document.getElementById("speed");
@@ -301,7 +289,12 @@
         const imp = -vn;
         a.vx -= imp*nx; a.vy -= imp*ny;
         b.vx += imp*nx; b.vy += imp*ny;
-        blip(160+Math.random()*240, 0.09, 0.04, "sine");
+        // Piglets running around: tiny randomized oinks (rate limited)
+        const now = performance.now();
+        if(!collide._t || (now - collide._t) > 70){
+          collide._t = now;
+          pigOink(0.09, 0.07, 280 + Math.random()*220);
+        }
       }
     }
   }
@@ -347,12 +340,22 @@
     ctx.fillStyle="#000";
     ctx.fillRect(0,0,canvas.width,canvas.height);
 
-    ctx.fillStyle="#d85a4a";
     for(const c of circles){
       const r = radius(c);
+      const sx = c._squashX || 1;
+      const sy = c._squashY || 1;
+      ctx.save();
+      ctx.translate(c.x, c.y);
+      ctx.scale(sx, sy);
+      ctx.fillStyle="#d85a4a";
       ctx.beginPath();
-      ctx.arc(c.x,c.y,r,0,Math.PI*2);
+      ctx.arc(0,0,r,0,Math.PI*2);
       ctx.fill();
+      // thickness / outline
+      ctx.lineWidth = Math.max(2.5*dpr, r*0.10);
+      ctx.strokeStyle = "rgba(255,255,255,0.32)";
+      ctx.stroke();
+      ctx.restore();
     }
 
     drawPurplePuffs();
@@ -368,7 +371,9 @@
 
   
   // ---------------- Tap handling ----------------
-  let lastTapTime = 0;
+  // IMPORTANT: iOS may fire both pointer + touch events unless we avoid double-binding.
+  // We bind ONE unified handler (pointer if available, else touch).
+  let lastTap = null; // {t,x,y}
   let activeCapture = null; // {circle, idx}
 
   function findCircleHit(x,y){
@@ -385,14 +390,11 @@
   function doPopAtCircle(idx, c){
     circles.splice(idx,1);
 
-    // purple haze puff + (optional) lightning flash
+    // Local purple haze puff (no screen-wide flash)
     addPurplePuff(c.x, c.y, radius(c));
-    fx=c.x; fy=c.y;
-    flash = 0.65;
-    screenFlash = 0.35;
 
-    if(popModeEl.value === "thunder") lightningPopThunderMp3();
-    else lightningPopSynth();
+    // piglet "pop" (a slightly sharper oink)
+    pigOink(0.26, 0.10, 520);
   }
 
   function beginCapture(hit, tx, ty){
@@ -413,6 +415,13 @@
     const now = performance.now();
     c._captured = { tx, ty, t0: now, until: now + dur, p, q, r, distPQ, vx:c.vx, vy:c.vy };
 
+    // "feel" the poke: flatten while captured
+    c._squashX = 1.18;
+    c._squashY = 0.72;
+
+    // piglet oik‑oik while captured
+    oikOik();
+
     // decide after squiggle: POP if tap is close enough; else ESCAPE
     setTimeout(()=>{
       // circle may already be gone or re-captured
@@ -420,6 +429,10 @@
       if(ci === -1) return;
       const cap = c._captured;
       c._captured = null;
+
+      // restore shape
+      c._squashX = 1;
+      c._squashY = 1;
 
       // POP rule
       if(cap && cap.distPQ < (0.5 * cap.r)){
@@ -449,39 +462,47 @@
     return true;
   }
 
-  function onTap(e){
-    const now = Date.now();
-    const isDouble = (now - lastTapTime) < 320;
-    lastTapTime = isDouble ? 0 : now;
-
+  function getXY(e){
     const rect = canvas.getBoundingClientRect();
-    const cx = (typeof e.clientX==="number") ? e.clientX :
-               (e.touches && e.touches[0] ? e.touches[0].clientX : NaN);
-    const cy = (typeof e.clientY==="number") ? e.clientY :
-               (e.touches && e.touches[0] ? e.touches[0].clientY : NaN);
-    const x = (cx - rect.left) * dpr;
-    const y = (cy - rect.top) * dpr;
+    let cx, cy;
+    if(e.touches && e.touches[0]){ cx = e.touches[0].clientX; cy = e.touches[0].clientY; }
+    else { cx = e.clientX; cy = e.clientY; }
+    return { x:(cx-rect.left)*dpr, y:(cy-rect.top)*dpr };
+  }
 
-    // Double-tap toggles panel (NOT single tap)
+  function togglePanel(){
+    panel.style.display = (panel.style.display==="none") ? "block" : "none";
+  }
+
+  function onUnifiedTap(e){
+    // Ignore right-click
+    if(e.button && e.button !== 0) return;
+
+    const {x,y} = getXY(e);
+    const now = performance.now();
+    const doubleDist2 = (26*dpr) * (26*dpr);
+    const isDouble = !!(lastTap && (now-lastTap.t)<300 && ((x-lastTap.x)**2 + (y-lastTap.y)**2) < doubleDist2);
+
     if(isDouble){
-      panel.style.display = (panel.style.display==="none") ? "block" : "none";
+      lastTap = null;
+      togglePanel();
       e.preventDefault();
       return;
     }
+    lastTap = {t:now,x,y};
 
     ensureAudio();
-
-    // Single tap: "capture" then POP or ESCAPE
     const hit = findCircleHit(x,y);
     if(hit) beginCapture(hit, x, y);
-
     e.preventDefault();
   }
 
-
-  canvas.addEventListener("pointerdown", onTap, {passive:false});
-  canvas.addEventListener("touchstart", onTap, {passive:false});
-  canvas.addEventListener("mousedown", onTap, {passive:false});
+  if(window.PointerEvent){
+    canvas.addEventListener("pointerdown", onUnifiedTap, {passive:false});
+  } else {
+    canvas.addEventListener("touchstart", onUnifiedTap, {passive:false});
+    canvas.addEventListener("mousedown", onUnifiedTap, {passive:false});
+  }
 
   // ---------------- UI buttons ----------------
   document.getElementById("reset").onclick = ()=> seed(18);
