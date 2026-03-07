@@ -61,7 +61,7 @@
   </div>
 
   <div class="hint">
-    • Single tap a circle to CAPTURE (squiggle), then it POPS or ESCAPES.<br>
+    • Single tap a circle to POP (lightning flash + sound).<br>
     • Double tap anywhere to hide/show this panel.<br>
     • For real thunder + lightning image, add files (see note at bottom).
   </div>
@@ -173,34 +173,6 @@
   let flash=0, fx=0, fy=0;
   let screenFlash=0;
 
-  // purple haze "puff" particles (for POP)
-  const puffs = []; // {x,y,r,life}
-  function addPurplePuff(x,y,baseR){
-    puffs.push({ x, y, r: Math.max(10*dpr, baseR*0.9), life: 1.0 });
-  }
-  function drawPurplePuffs(){
-    if(!puffs.length) return;
-    ctx.save();
-    ctx.globalCompositeOperation = "lighter";
-    for(let i=puffs.length-1;i>=0;i--){
-      const p = puffs[i];
-      const a = p.life;
-      const R = p.r * (1.0 + (1.8*(1-a)));
-      const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, R);
-      g.addColorStop(0, `rgba(210,130,255,${0.55*a})`);
-      g.addColorStop(0.35, `rgba(170,70,255,${0.28*a})`);
-      g.addColorStop(1, "rgba(120,0,180,0)");
-      ctx.fillStyle = g;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, R, 0, Math.PI*2);
-      ctx.fill();
-
-      p.life -= 0.08;
-      if(p.life <= 0) puffs.splice(i,1);
-    }
-    ctx.restore();
-  }
-
   function drawLightning(){
     // local radial flash
     if(flash>0){
@@ -311,18 +283,7 @@
   function step(){
     if(paused) return;
 
-    const now = performance.now();
-
     for(const c of circles){
-      // "Captured" circle squiggles under the finger briefly
-      if(c._captured && now < c._captured.until){
-        const amp = 7*dpr;
-        const t = (now - c._captured.t0) / 40;
-        c.x = c._captured.tx + Math.sin(t*2.4) * amp * 0.55 + (Math.random()-0.5)*amp*0.25;
-        c.y = c._captured.ty + Math.cos(t*2.1) * amp * 0.55 + (Math.random()-0.5)*amp*0.25;
-        continue;
-      }
-
       c.x += c.vx * speedMul;
       c.y += c.vy * speedMul;
 
@@ -335,13 +296,10 @@
 
     for(let i=0;i<circles.length;i++){
       for(let j=i+1;j<circles.length;j++){
-        // Skip collisions for circles that are currently captured (prevents jitter fights)
-        if(circles[i]._captured || circles[j]._captured) continue;
         collide(circles[i], circles[j]);
       }
     }
   }
-
 
   function draw(){
     ctx.fillStyle="#000";
@@ -355,7 +313,6 @@
       ctx.fill();
     }
 
-    drawPurplePuffs();
     drawLightning();
   }
 
@@ -366,93 +323,42 @@
   }
   requestAnimationFrame(loop);
 
-  
   // ---------------- Tap handling ----------------
   let lastTapTime = 0;
-  let activeCapture = null; // {circle, idx}
 
-  function findCircleHit(x,y){
+  function popAt(x,y){
     for(let i=circles.length-1;i>=0;i--){
       const c = circles[i];
       const r = radius(c);
       const rr = r + tapPad*dpr;
       const dx=x-c.x, dy=y-c.y;
-      if(dx*dx + dy*dy <= rr*rr) return {i,c,r};
-    }
-    return null;
-  }
+      if(dx*dx + dy*dy <= rr*rr){
+        circles.splice(i,1);
 
-  function doPopAtCircle(idx, c){
-    circles.splice(idx,1);
+        fx=c.x; fy=c.y;
+        flash = 1.0;
+        screenFlash = 0.85;
 
-    // purple haze puff + (optional) lightning flash
-    addPurplePuff(c.x, c.y, radius(c));
-    fx=c.x; fy=c.y;
-    flash = 0.65;
-    screenFlash = 0.35;
+        if(popModeEl.value === "thunder") lightningPopThunderMp3();
+        else lightningPopSynth();
 
-    if(popModeEl.value === "thunder") lightningPopThunderMp3();
-    else lightningPopSynth();
-  }
-
-  function beginCapture(hit, tx, ty){
-    if(!hit) return false;
-    const {i,c,r} = hit;
-
-    // only one capture at a time
-    if(activeCapture && activeCapture.circle && activeCapture.circle._captured){
-      activeCapture.circle._captured = null;
-    }
-    activeCapture = { circle:c, idx:i };
-
-    const p = c.x, q = c.y;
-    const distPQ = Math.hypot(p-tx, q-ty);
-
-    // "under the thumb" squiggle for a short moment
-    const dur = 320; // ms
-    const now = performance.now();
-    c._captured = { tx, ty, t0: now, until: now + dur, p, q, r, distPQ, vx:c.vx, vy:c.vy };
-
-    // decide after squiggle: POP if tap is close enough; else ESCAPE
-    setTimeout(()=>{
-      // circle may already be gone or re-captured
-      const ci = circles.indexOf(c);
-      if(ci === -1) return;
-      const cap = c._captured;
-      c._captured = null;
-
-      // POP rule
-      if(cap && cap.distPQ < (0.5 * cap.r)){
-        doPopAtCircle(ci, c);
-        return;
+        return true;
       }
-
-      // ESCAPE (your 4 quadrant rules all map to escape if not pop)
-      // direction: from tap (x,y) toward original center (p,q); speed doubled
-      const dx = (cap ? cap.p : c.x) - (cap ? cap.tx : tx);
-      const dy = (cap ? cap.q : c.y) - (cap ? cap.ty : ty);
-      const d  = Math.hypot(dx,dy) || 1;
-      const ux = dx/d, uy = dy/d;
-
-      const base = Math.hypot(cap?.vx ?? c.vx, cap?.vy ?? c.vy);
-      const sp = Math.max(1.6*dpr, base) * 2.0;
-
-      c.vx = ux * sp;
-      c.vy = uy * sp;
-
-      // nudge it immediately so it "breaks free"
-      c.x = (cap ? cap.tx : tx) + ux * (cap ? cap.r : radius(c)) * 0.65;
-      c.y = (cap ? cap.ty : ty) + uy * (cap ? cap.r : radius(c)) * 0.65;
-
-    }, dur);
-
-    return true;
+    }
+    return false;
   }
 
   function onTap(e){
     const now = Date.now();
     const isDouble = (now - lastTapTime) < 320;
     lastTapTime = isDouble ? 0 : now;
+
+    if(isDouble){
+      panel.style.display = (panel.style.display==="none") ? "block" : "none";
+      return;
+    }
+
+    ensureAudio();
 
     const rect = canvas.getBoundingClientRect();
     const cx = (typeof e.clientX==="number") ? e.clientX :
@@ -462,22 +368,9 @@
     const x = (cx - rect.left) * dpr;
     const y = (cy - rect.top) * dpr;
 
-    // Double-tap toggles panel (NOT single tap)
-    if(isDouble){
-      panel.style.display = (panel.style.display==="none") ? "block" : "none";
-      e.preventDefault();
-      return;
-    }
-
-    ensureAudio();
-
-    // Single tap: "capture" then POP or ESCAPE
-    const hit = findCircleHit(x,y);
-    if(hit) beginCapture(hit, x, y);
-
+    popAt(x,y);
     e.preventDefault();
   }
-
 
   canvas.addEventListener("pointerdown", onTap, {passive:false});
   canvas.addEventListener("touchstart", onTap, {passive:false});
