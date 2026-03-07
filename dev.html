@@ -3,613 +3,490 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>Screamsaver — Piglet Pop + Sliders</title>
+<title>Screamsaver — Piglet Escape</title>
 <style>
-  html,body{margin:0;height:100%;background:#000;overflow:hidden;font-family:system-ui}
+  html,body{margin:0;height:100%;background:#000;overflow:hidden;font-family:system-ui,-apple-system,sans-serif}
   canvas{display:block;width:100vw;height:100vh;touch-action:none}
   #panel{
-    position:fixed;top:14px;left:14px;right:14px;
-    background:rgba(20,20,22,.9);color:#fff;border-radius:18px;padding:12px 12px 10px;
+    position:fixed;top:14px;left:14px;right:14px;z-index:10;
+    background:rgba(20,20,22,.90);color:#fff;border-radius:18px;padding:12px 12px 10px;
     box-shadow:0 20px 60px rgba(0,0,0,.55);
-    -webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);
-    user-select:none
+    -webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);user-select:none
   }
   .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
   button,select{
     font-size:18px;border-radius:14px;padding:8px 14px;margin:0;
-    border:1px solid rgba(255,255,255,.35);
-    background:rgba(255,255,255,.10);color:#fff
+    border:1px solid rgba(255,255,255,.35);background:rgba(255,255,255,.10);color:#fff
   }
   .sliderRow{display:grid;grid-template-columns:140px 1fr 56px;gap:10px;align-items:center;margin:10px 0}
   .label{opacity:.9;font-size:16px}
   input[type="range"]{width:100%}
   .val{font-variant-numeric:tabular-nums;text-align:right;opacity:.95}
-  .hint{font-size:13px;opacity:.8;line-height:1.25;margin-top:6px}
-
-  #fxLayer{
-    position:fixed;left:0;top:0;right:0;bottom:0;
-    pointer-events:none;overflow:visible;z-index:900;
+  .hint{font-size:13px;opacity:.82;line-height:1.25;margin-top:6px}
+  #hud{
+    position:fixed;left:14px;bottom:14px;z-index:9;color:#fff;
+    background:rgba(0,0,0,.42);padding:8px 12px;border-radius:12px;font-size:17px;
+    border:1px solid rgba(255,255,255,.18)
   }
-  .pigletClip{
-    position:absolute;
-    width:96px;height:96px;
-    transform:translate(-50%,-50%);
-    border-radius:22px;
-    box-shadow:0 10px 30px rgba(0,0,0,.45);
-    opacity:0.98;
-    mix-blend-mode:screen;
+  #end{
+    position:fixed;inset:0;display:none;align-items:center;justify-content:center;z-index:20;
+    background:rgba(0,0,0,.55)
   }
-  .pigletFallback{
-    position:absolute;
-    transform:translate(-50%,-50%);
-    font-size:64px;
-    filter: drop-shadow(0 10px 16px rgba(0,0,0,.5));
-    opacity:0.95;
+  #card{
+    min-width:280px;max-width:90vw;background:rgba(20,20,22,.96);color:#fff;
+    border-radius:22px;padding:20px 18px;box-shadow:0 24px 70px rgba(0,0,0,.6);text-align:center
   }
+  #scoreBig{font-size:42px;font-weight:800;line-height:1;margin:8px 0 10px}
+  #sub{opacity:.85;margin-bottom:16px}
 </style>
 </head>
 <body>
-
 <canvas id="c"></canvas>
-<div id="fxLayer"></div>
-
 <div id="panel">
   <div class="row">
-    <button id="reset">Reset</button>
+    <button id="reset">New Play</button>
     <button id="pause">Pause</button>
     <button id="soundBtn">Sound On</button>
-    <select id="popMode" title="Pop sound">
-      <option value="synth">Pop: Synth</option>
-      <option value="thunder">Pop: Thunder MP3</option>
-    </select>
   </div>
 
   <div class="sliderRow">
-    <div class="label">Speed</div>
-    <input id="speed" type="range" min="0.3" max="3.0" step="0.05" value="1.4">
-    <div class="val" id="speedV">1.40</div>
+    <div class="label">Max speed</div>
+    <input id="speed" type="range" min="0.5" max="4.5" step="0.05" value="2.4">
+    <div class="val" id="speedV">2.40</div>
   </div>
 
   <div class="sliderRow">
     <div class="label">Size</div>
-    <input id="size" type="range" min="0.5" max="1.8" step="0.05" value="1.0">
+    <input id="size" type="range" min="0.65" max="1.8" step="0.05" value="1.0">
     <div class="val" id="sizeV">1.00</div>
   </div>
 
   <div class="sliderRow">
-    <div class="label">Tap radius</div>
-    <input id="tapPad" type="range" min="0" max="36" step="1" value="10">
-    <div class="val" id="tapPadV">10</div>
+    <div class="label">Count</div>
+    <input id="count" type="range" min="10" max="10" step="1" value="10">
+    <div class="val" id="countV">10</div>
   </div>
 
   <div class="hint">
-    • Single tap a circle to CAPTURE (squiggle + oik‑oik), then it POPS or ESCAPES.<br>
-    • Double tap anywhere to hide/show this panel (single tap won’t toggle).<br>
-    • Purple puff is local (no screen flash).
+    • Tap inside the inner half-radius to POP.<br>
+    • Tap the outer half of a piglet circle to poke it, hear an oink, and make it run.<br>
+    • Double-tap the empty background to hide/show this panel.<br>
+    • Play ends when all 10 circles are popped. Score = time from first pop to last pop.
+  </div>
+</div>
+
+<div id="hud">Left: <span id="leftN">10</span> • Score: <span id="liveScore">0.00</span>s</div>
+<div id="end">
+  <div id="card">
+    <div style="font-size:26px;font-weight:700">Play Complete</div>
+    <div id="scoreBig">0.00s</div>
+    <div id="sub">Time from first pop to last pop</div>
+    <button id="again">Play Again</button>
   </div>
 </div>
 
 <script>
 (() => {
-  const canvas = document.getElementById("c");
-  const ctx = canvas.getContext("2d");
-  const panel = document.getElementById("panel");
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  const panel = document.getElementById('panel');
+  const hudLeft = document.getElementById('leftN');
+  const liveScoreEl = document.getElementById('liveScore');
+  const endEl = document.getElementById('end');
+  const scoreBig = document.getElementById('scoreBig');
 
-  // Prevent panel interaction from triggering canvas taps
-  ["pointerdown","touchstart","mousedown","click"].forEach(ev=>{
-    panel.addEventListener(ev, e=>e.stopPropagation(), {passive:false});
+  ['pointerdown','touchstart','mousedown','click','dblclick'].forEach(ev => {
+    panel.addEventListener(ev, e => e.stopPropagation(), {passive:false});
+    endEl.addEventListener(ev, e => e.stopPropagation(), {passive:false});
   });
 
-  // HiDPI sizing
-  let dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+  let dpr = 1;
   function resize(){
     dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
     canvas.width = Math.floor(innerWidth * dpr);
     canvas.height = Math.floor(innerHeight * dpr);
-    canvas.style.width = innerWidth + "px";
-    canvas.style.height = innerHeight + "px";
+    canvas.style.width = innerWidth + 'px';
+    canvas.style.height = innerHeight + 'px';
   }
-  addEventListener("resize", resize, {passive:true});
+  addEventListener('resize', resize, {passive:true});
   resize();
 
-  // ---------------- Audio (iOS unlock safe) ----------------
+  const speedEl = document.getElementById('speed');
+  const sizeEl = document.getElementById('size');
+  const countEl = document.getElementById('count');
+  const speedV = document.getElementById('speedV');
+  const sizeV = document.getElementById('sizeV');
+  const countV = document.getElementById('countV');
+  let maxSpeed = parseFloat(speedEl.value);
+  let sizeMul = parseFloat(sizeEl.value);
+  const totalCount = 10;
+  function syncLabels(){
+    speedV.textContent = maxSpeed.toFixed(2);
+    sizeV.textContent = sizeMul.toFixed(2);
+    countV.textContent = '10';
+  }
+  syncLabels();
+  speedEl.addEventListener('input', ()=>{ maxSpeed = parseFloat(speedEl.value); syncLabels(); reseedVelocities(); });
+  sizeEl.addEventListener('input', ()=>{ sizeMul = parseFloat(sizeEl.value); syncLabels(); });
+  countEl.addEventListener('input', ()=>{ countEl.value = 10; syncLabels(); });
+
   let audioOn = true;
   let ac = null, master = null;
-
-  // External MP3 thunder (optional)
-  // Put your MP3 at: assets/sfx/thunder.mp3 (or update path below)
-  const thunder = new Audio("assets/sfx/thunder.mp3");
-  thunder.preload = "auto";
-  thunder.volume = 1.0;
-
   function ensureAudio(){
     if(!audioOn) return null;
-    // Unlock AudioContext for synth
     if(!ac){
       ac = new (window.AudioContext || window.webkitAudioContext)();
       master = ac.createGain();
       master.gain.value = 0.95;
       master.connect(ac.destination);
     }
-    if(ac.state === "suspended"){ try{ ac.resume(); }catch(e){} }
-    // Prime <audio> too (gesture required on iOS)
-    try{
-      thunder.muted = false;
-      thunder.play().then(()=>{ thunder.pause(); thunder.currentTime = 0; }).catch(()=>{});
-    }catch(e){}
+    if(ac.state === 'suspended'){ try{ ac.resume(); }catch(e){} }
     return ac;
   }
-
-  function blip(freq=220,vol=0.14,dur=0.05,type="sine"){
-    if(!audioOn) return;
-    const A = ensureAudio(); if(!A) return;
-    const t=A.currentTime;
-    const o=A.createOscillator();
-    const g=A.createGain();
-    o.type=type;
-    o.frequency.setValueAtTime(freq,t);
-    g.gain.setValueAtTime(0.0001,t);
-    g.gain.exponentialRampToValueAtTime(Math.max(0.0002,vol),t+0.006);
-    g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
-    o.connect(g); g.connect(master);
-    o.start(t); o.stop(t+dur+0.02);
-  }
-
-  // --- Piglet-style "oink" synth (no external files) ---
-  function pigOink(vol=0.22, dur=0.12, f0=520){
+  function tone(freq=240, vol=0.15, dur=0.06, type='sine'){
     if(!audioOn) return;
     const A = ensureAudio(); if(!A) return;
     const t = A.currentTime;
     const o = A.createOscillator();
     const g = A.createGain();
-    o.type = "triangle";
-    o.frequency.setValueAtTime(f0, t);
-    o.frequency.exponentialRampToValueAtTime(Math.max(95, f0*0.35), t+dur);
+    o.type = type; o.frequency.setValueAtTime(freq, t);
     g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(Math.max(0.0002, vol), t+0.010);
+    g.gain.exponentialRampToValueAtTime(Math.max(0.0002, vol), t+0.005);
     g.gain.exponentialRampToValueAtTime(0.0001, t+dur);
-    o.connect(g); g.connect(master);
-    o.start(t); o.stop(t+dur+0.04);
+    o.connect(g); g.connect(master); o.start(t); o.stop(t+dur+0.02);
+  }
+  function popSound(){
+    tone(1400,0.35,0.02,'square');
+    tone(840,0.20,0.03,'sawtooth');
+    tone(180,0.55,0.18,'sine');
   }
 
-  function oikOik(){
-    pigOink(0.22, 0.10, 560);
-    setTimeout(()=>pigOink(0.18, 0.10, 430), 95);
-  }
-
-  // Lightning-ish synth pop (fallback)
-  function lightningPopSynth(){
+  const oinkA = new Audio('assets/sfx/pig_oink.mp3');
+  const oinkB = new Audio('assets/sfx/pig_oink1.mp3');
+  [oinkA,oinkB].forEach(a => { a.preload='auto'; a.volume=1.0; });
+  function primeAudios(){ [oinkA,oinkB].forEach(a => { try{ a.play().then(()=>{a.pause(); a.currentTime=0;}).catch(()=>{}); }catch(e){} }); }
+  function playOink(){
     if(!audioOn) return;
-    blip(1400, 0.45, 0.02, "square");     // crack
-    blip(900,  0.22, 0.03, "sawtooth");   // snap
-    const A = ensureAudio(); if(!A) return;
-    const t=A.currentTime;
-    const o=A.createOscillator();
-    const g=A.createGain();
-    o.type="sine";
-    o.frequency.setValueAtTime(220,t);
-    o.frequency.exponentialRampToValueAtTime(55,t+0.22);
-    g.gain.setValueAtTime(0.0001,t);
-    g.gain.exponentialRampToValueAtTime(0.9,t+0.015);
-    g.gain.exponentialRampToValueAtTime(0.0001,t+0.26);
-    o.connect(g); g.connect(master);
-    o.start(t); o.stop(t+0.30);
+    const a = (Math.random() < 0.5 ? oinkA : oinkB).cloneNode();
+    a.volume = 1.0;
+    a.play().catch(()=> tone(420,0.24,0.08,'square'));
   }
 
-  function lightningPopThunderMp3(){
-    if(!audioOn) return;
-    try{
-      thunder.currentTime = 0;
-      thunder.volume = 1.0;
-      thunder.play().catch(()=>{});
-    }catch(e){}
-  }
+  const pigSprite = new Image();
+  pigSprite.src = 'assets/sfx/piglet_escape_sprite.png';
+  let pigSpriteReady = false;
+  pigSprite.onload = ()=> pigSpriteReady = true;
+  const SPRITE_FRAMES = 6;
+  const FRAME_W = 256;
+  const FRAME_H = 256;
 
-  // ---------------- Lightning visual ----------------
-  // Optional lightning PNG/JPG (transparent background recommended)
-  // Put at: assets/img/lightning.png
-  const lightningImg = new Image();
-  lightningImg.src = "assets/img/lightning.png";
-  let lightningImgReady = false;
-  lightningImg.onload = ()=>{ lightningImgReady = true; };
-
-  // flash state
-  let flash=0, fx=0, fy=0;
-  let screenFlash=0;
-
-  // purple haze "puff" particles (for POP)
-  const puffs = []; // {x,y,r,life}
-  function addPurplePuff(x,y,baseR){
-    puffs.push({ x, y, r: Math.max(14*dpr, baseR*1.05), life: 1.0 });
-  }
-  function drawPurplePuffs(){
-    if(!puffs.length) return;
-    ctx.save();
-    ctx.globalCompositeOperation = "lighter";
-    for(let i=puffs.length-1;i>=0;i--){
-      const p = puffs[i];
-      const a = p.life;
-      const R = p.r * (1.0 + (1.8*(1-a)));
-      const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, R);
-      g.addColorStop(0, `rgba(240,170,255,${0.78*a})`);
-      g.addColorStop(0.28, `rgba(200,80,255,${0.44*a})`);
-      g.addColorStop(0.62, `rgba(140,30,220,${0.16*a})`);
-      g.addColorStop(1, "rgba(120,0,180,0)");
-      ctx.fillStyle = g;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, R, 0, Math.PI*2);
-      ctx.fill();
-
-      p.life -= 0.075;
-      if(p.life <= 0) puffs.splice(i,1);
-    }
-    ctx.restore();
-  }
-
-  // Screen-wide flash removed (user request). Keep as noop for now.
-  function drawLightning(){ /* no-op */ }
-
-  // ---------------- Controls ----------------
-  const speedEl = document.getElementById("speed");
-  const sizeEl  = document.getElementById("size");
-  const tapPadEl= document.getElementById("tapPad");
-  const popModeEl = document.getElementById("popMode");
-  const speedV = document.getElementById("speedV");
-  const sizeV  = document.getElementById("sizeV");
-  const tapPadV= document.getElementById("tapPadV");
-
-  let speedMul = parseFloat(speedEl.value);
-  let sizeMul  = parseFloat(sizeEl.value);
-  let tapPad   = parseFloat(tapPadEl.value);
-
-  function syncLabels(){
-    speedV.textContent = speedMul.toFixed(2);
-    sizeV.textContent  = sizeMul.toFixed(2);
-    tapPadV.textContent = Math.round(tapPad).toString();
-  }
-  syncLabels();
-
-  speedEl.addEventListener("input", ()=>{ speedMul = parseFloat(speedEl.value); syncLabels(); });
-  sizeEl.addEventListener("input",  ()=>{ sizeMul  = parseFloat(sizeEl.value); syncLabels(); });
-  tapPadEl.addEventListener("input",()=>{ tapPad   = parseFloat(tapPadEl.value); syncLabels(); });
-
-  // ---------------- Circles ----------------
-  let circles = [];
   function rand(a,b){ return a + Math.random()*(b-a); }
+  function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
+  function circleRadius(c){ return c.r0 * sizeMul; }
 
-  function seed(n=18){
+  let circles = [];
+  let particles = [];
+  let paused = false;
+  let playEnded = false;
+  let startPopTime = 0;
+  let finalScore = 0;
+
+  function randomVelocity(){
+    const ang = rand(0, Math.PI*2);
+    const mag = rand(0.35*maxSpeed, maxSpeed) * dpr;
+    return {vx: Math.cos(ang)*mag, vy: Math.sin(ang)*mag};
+  }
+
+  function makeCircle(){
+    const r0 = rand(24, 42) * dpr;
+    const vel = randomVelocity();
+    return {
+      x: rand(r0, canvas.width-r0),
+      y: rand(r0, canvas.height-r0),
+      r0,
+      vx: vel.vx,
+      vy: vel.vy,
+      state: 'normal',
+      safeVx: vel.vx,
+      safeVy: vel.vy,
+      stateUntil: 0,
+      stateTimer: 0,
+      spriteFrame: 0,
+      spriteClock: 0,
+      lookBack: false,
+      targetX: 0,
+      targetY: 0,
+      oldX: 0,
+      oldY: 0
+    };
+  }
+
+  function seed(){
     circles = [];
-    for(let i=0;i<n;i++){
-      const baseR = rand(18, 44) * dpr;
-      circles.push({
-        x: rand(baseR, canvas.width-baseR),
-        y: rand(baseR, canvas.height-baseR),
-        r0: baseR,
-        vx: rand(-1.9, 1.9) * dpr,
-        vy: rand(-1.9, 1.9) * dpr
-      });
+    particles = [];
+    playEnded = false;
+    startPopTime = 0;
+    finalScore = 0;
+    endEl.style.display = 'none';
+    for(let i=0;i<totalCount;i++) circles.push(makeCircle());
+    hudLeft.textContent = circles.length;
+    liveScoreEl.textContent = '0.00';
+  }
+  seed();
+
+  function reseedVelocities(){
+    for(const c of circles){
+      if(c.state === 'normal'){
+        const ang = Math.atan2(c.vy, c.vx) || rand(0, Math.PI*2);
+        const mag = clamp(Math.hypot(c.vx,c.vy), 0.35*maxSpeed*dpr, maxSpeed*dpr);
+        c.vx = Math.cos(ang)*mag;
+        c.vy = Math.sin(ang)*mag;
+      }
     }
   }
-  seed(18);
 
-  function radius(c){ return c.r0 * sizeMul; }
+  function burst(x,y){
+    for(let i=0;i<14;i++){
+      const a = rand(0, Math.PI*2), s = rand(2, 9)*dpr;
+      particles.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:1,r:rand(2,5)*dpr});
+    }
+  }
+
+  function removeCircle(c){
+    const i = circles.indexOf(c);
+    if(i>=0) circles.splice(i,1);
+  }
+
+  function handlePop(c){
+    if(!startPopTime) startPopTime = performance.now();
+    popSound();
+    burst(c.x,c.y);
+    removeCircle(c);
+    hudLeft.textContent = circles.length;
+    if(circles.length === 0){
+      finalScore = ((performance.now() - startPopTime)/1000);
+      playEnded = true;
+      scoreBig.textContent = finalScore.toFixed(2)+'s';
+      endEl.style.display = 'flex';
+    }
+  }
+
+  function pokePiglet(c, tapX, tapY){
+    c.state = 'poked';
+    c.stateUntil = performance.now() + 1000;
+    c.oldX = c.x; c.oldY = c.y;
+    c.targetX = tapX; c.targetY = tapY;
+    c.spriteClock = 0; c.spriteFrame = 1;
+    playOink();
+
+    const dx = c.x - tapX, dy = c.y - tapY;
+    const len = Math.hypot(dx,dy) || 1;
+    const nx = dx/len, ny = dy/len;
+    const safe = (150 + Math.random()*90) * dpr;
+    c.safeX = clamp(c.x + nx*safe, circleRadius(c), canvas.width-circleRadius(c));
+    c.safeY = clamp(c.y + ny*safe, circleRadius(c), canvas.height-circleRadius(c));
+    c.lookBack = Math.random() < 0.20;
+    c.safeVx = nx * rand(0.55*maxSpeed, 1.1*maxSpeed) * dpr;
+    c.safeVy = ny * rand(0.55*maxSpeed, 1.1*maxSpeed) * dpr;
+  }
+
+  function startEscape(c){
+    c.state = 'escape';
+    c.stateUntil = 0;
+    c.spriteClock = 0;
+    c.spriteFrame = 0;
+  }
+
+  function beginLookback(c){
+    c.state = 'look';
+    c.stateUntil = performance.now() + 550;
+    c.spriteClock = 0;
+    c.spriteFrame = 4;
+    c.vx = 0; c.vy = 0;
+  }
+
+  function endLookback(c){
+    c.state = 'normal';
+    c.vx = c.safeVx;
+    c.vy = c.safeVy;
+  }
 
   function collide(a,b){
-    const ar = radius(a), br = radius(b);
-    const dx=b.x-a.x, dy=b.y-a.y;
-    const dist=Math.hypot(dx,dy);
-    const min=ar+br;
+    if(a.state !== 'normal' || b.state !== 'normal') return;
+    const ar = circleRadius(a), br = circleRadius(b);
+    const dx = b.x-a.x, dy = b.y-a.y;
+    const dist = Math.hypot(dx,dy);
+    const min = ar+br;
     if(dist<min && dist>0.0001){
       const nx=dx/dist, ny=dy/dist;
       const overlap=min-dist;
       a.x-=nx*overlap/2; a.y-=ny*overlap/2;
       b.x+=nx*overlap/2; b.y+=ny*overlap/2;
-
       const dvx=b.vx-a.vx, dvy=b.vy-a.vy;
       const vn=dvx*nx + dvy*ny;
       if(vn<0){
         const imp = -vn;
         a.vx -= imp*nx; a.vy -= imp*ny;
         b.vx += imp*nx; b.vy += imp*ny;
-        // Piglets running around: tiny randomized oinks (rate limited)
-        const now = performance.now();
-        if(!collide._t || (now - collide._t) > 70){
-          collide._t = now;
-          pigOink(0.09, 0.07, 280 + Math.random()*220);
-        }
       }
     }
   }
 
-  let paused = false;
-
-  function step(){
-    if(paused) return;
-
-    const now = performance.now();
-
-    for(const c of circles){
-      // "Captured" circle squiggles under the finger briefly
-      if(c._captured && now < c._captured.until){
-        const amp = 7*dpr;
-        const t = (now - c._captured.t0) / 40;
-        c.x = c._captured.tx + Math.sin(t*2.4) * amp * 0.55 + (Math.random()-0.5)*amp*0.25;
-        c.y = c._captured.ty + Math.cos(t*2.1) * amp * 0.55 + (Math.random()-0.5)*amp*0.25;
-        continue;
+  function updateCircle(c, dt){
+    const r = circleRadius(c);
+    if(c.state === 'normal'){
+      c.x += c.vx * dt;
+      c.y += c.vy * dt;
+    } else if(c.state === 'poked'){
+      c.x = c.oldX;
+      c.y = c.oldY;
+      if(performance.now() >= c.stateUntil) startEscape(c);
+    } else if(c.state === 'escape'){
+      const dx = c.safeX - c.x, dy = c.safeY - c.y;
+      const dist = Math.hypot(dx,dy);
+      const speed = Math.max(2.2, 1.25*maxSpeed) * dpr;
+      if(dist < speed*dt + 3*dpr){
+        c.x = c.safeX; c.y = c.safeY;
+        if(c.lookBack) beginLookback(c);
+        else { c.state = 'normal'; c.vx = c.safeVx; c.vy = c.safeVy; }
+      } else {
+        c.x += dx / dist * speed * dt;
+        c.y += dy / dist * speed * dt;
       }
-
-      c.x += c.vx * speedMul;
-      c.y += c.vy * speedMul;
-
-      const r = radius(c);
-      if(c.x-r<0){ c.x=r; c.vx*=-1; }
-      if(c.x+r>canvas.width){ c.x=canvas.width-r; c.vx*=-1; }
-      if(c.y-r<0){ c.y=r; c.vy*=-1; }
-      if(c.y+r>canvas.height){ c.y=canvas.height-r; c.vy*=-1; }
+      c.spriteClock += dt;
+      if(c.spriteClock > 0.08){ c.spriteClock = 0; c.spriteFrame = (c.spriteFrame + 1) % SPRITE_FRAMES; }
+    } else if(c.state === 'look'){
+      if(performance.now() >= c.stateUntil) endLookback(c);
+      c.spriteClock += dt;
+      if(c.spriteClock > 0.13){ c.spriteClock = 0; c.spriteFrame = (c.spriteFrame === 4 ? 5 : 4); }
     }
 
-    for(let i=0;i<circles.length;i++){
-      for(let j=i+1;j<circles.length;j++){
-        // Skip collisions for circles that are currently captured (prevents jitter fights)
-        if(circles[i]._captured || circles[j]._captured) continue;
-        collide(circles[i], circles[j]);
-      }
+    if(c.x-r<0){ c.x=r; if(c.state==='normal') c.vx=Math.abs(c.vx); }
+    if(c.x+r>canvas.width){ c.x=canvas.width-r; if(c.state==='normal') c.vx=-Math.abs(c.vx); }
+    if(c.y-r<0){ c.y=r; if(c.state==='normal') c.vy=Math.abs(c.vy); }
+    if(c.y+r>canvas.height){ c.y=canvas.height-r; if(c.state==='normal') c.vy=-Math.abs(c.vy); }
+  }
+
+  function updateParticles(dt){
+    for(let i=particles.length-1;i>=0;i--){
+      const p = particles[i];
+      p.x += p.vx * dt; p.y += p.vy * dt; p.life -= 1.9*dt; p.r *= 0.985;
+      if(p.life <= 0 || p.r < 0.5) particles.splice(i,1);
     }
   }
 
+  function drawPigSprite(c){
+    const size = circleRadius(c)*2.25;
+    let frame = c.spriteFrame;
+    if(c.state === 'poked') frame = 1;
+    if(c.state === 'look') frame = 3;
+    const sx = frame * FRAME_W;
+    const facingLeft = (c.state === 'escape' || c.state === 'look') ? (c.safeX < c.oldX) : (c.vx < 0);
+    ctx.save();
+    ctx.translate(c.x, c.y);
+    if(facingLeft){ ctx.scale(-1,1); }
+    if(pigSpriteReady){
+      ctx.drawImage(pigSprite, sx, 0, FRAME_W, FRAME_H, -size/2, -size/2, size, size);
+    } else {
+      ctx.fillStyle = '#f6b6c2';
+      ctx.beginPath(); ctx.arc(0,0,circleRadius(c),0,Math.PI*2); ctx.fill();
+    }
+    ctx.restore();
+  }
 
   function draw(){
-    ctx.fillStyle="#000";
+    ctx.fillStyle = '#000';
     ctx.fillRect(0,0,canvas.width,canvas.height);
 
     for(const c of circles){
-      const r = radius(c);
-      const sx = c._squashX || 1;
-      const sy = c._squashY || 1;
-      ctx.save();
-      ctx.translate(c.x, c.y);
-      ctx.scale(sx, sy);
-      ctx.fillStyle="#d85a4a";
-      ctx.beginPath();
-      ctx.arc(0,0,r,0,Math.PI*2);
-      ctx.fill();
-      // thickness / outline
-      ctx.lineWidth = Math.max(2.5*dpr, r*0.10);
-      ctx.strokeStyle = "rgba(255,255,255,0.32)";
-      ctx.stroke();
-      ctx.restore();
+      if(c.state === 'normal'){
+        ctx.fillStyle = '#d85a4a';
+        ctx.beginPath(); ctx.arc(c.x,c.y,circleRadius(c),0,Math.PI*2); ctx.fill();
+      } else {
+        drawPigSprite(c);
+      }
     }
 
-    drawPurplePuffs();
-    drawLightning();
+    for(const p of particles){
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, p.life);
+      ctx.fillStyle = '#ffe88b';
+      ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,Math.PI*2); ctx.fill();
+      ctx.restore();
+    }
   }
 
-  function loop(){
-    step();
+  let prev = performance.now();
+  function loop(now){
+    const dt = Math.min(0.03, (now - prev)/1000);
+    prev = now;
+    if(!paused && !playEnded){
+      for(const c of circles) updateCircle(c, dt*60);
+      for(let i=0;i<circles.length;i++) for(let j=i+1;j<circles.length;j++) collide(circles[i], circles[j]);
+      updateParticles(dt*60);
+      if(startPopTime && circles.length>0) liveScoreEl.textContent = ((performance.now()-startPopTime)/1000).toFixed(2);
+      else if(playEnded) liveScoreEl.textContent = finalScore.toFixed(2);
+    }
     draw();
     requestAnimationFrame(loop);
   }
   requestAnimationFrame(loop);
 
-  
-  
-  // ---------------- Piglet clip overlay ----------------
-  const fxLayer = document.getElementById("fxLayer");
-
-  function showPigletClip(clientX, clientY){
-    // Tries to play a short piglet video at the capture point.
-    // Put a file named "piglet.mp4" next to this html file (same folder).
-    // iOS requires muted + playsInline for autoplay; we set both.
-    const v = document.createElement("video");
-    v.className = "pigletClip";
-    v.src = "piglet.mp4";
-    v.muted = true;
-    v.playsInline = true;
-    v.loop = true;
-    v.autoplay = true;
-    v.preload = "auto";
-
-    v.style.left = clientX + "px";
-    v.style.top  = clientY + "px";
-
-    fxLayer.appendChild(v);
-
-    // Try to start immediately; if blocked or missing file, fall back to emoji pig.
-    const tryPlay = v.play();
-    if(tryPlay && typeof tryPlay.catch === "function"){
-      tryPlay.catch(()=>{ 
-        try{ v.remove(); }catch(_){}
-        return showPigletFallback(clientX, clientY);
-      });
-    }
-
-    // If file 404/missing, 'error' fires.
-    v.addEventListener("error", ()=>{
-      try{ v.remove(); }catch(_){}
-      showPigletFallback(clientX, clientY);
-    }, {once:true});
-
-    return { el:v, remove:()=>{ try{ v.pause(); v.remove(); }catch(_){} } };
+  function canvasPoint(e){
+    const rect = canvas.getBoundingClientRect();
+    const cx = (typeof e.clientX==='number') ? e.clientX : (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
+    const cy = (typeof e.clientY==='number') ? e.clientY : (e.touches && e.touches[0] ? e.touches[0].clientY : 0);
+    return {x:(cx-rect.left)*dpr, y:(cy-rect.top)*dpr};
   }
 
-  function showPigletFallback(clientX, clientY){
-    const d = document.createElement("div");
-    d.className = "pigletFallback";
-    d.textContent = "🐷";
-    d.style.left = clientX + "px";
-    d.style.top  = clientY + "px";
-    fxLayer.appendChild(d);
-    return { el:d, remove:()=>{ try{ d.remove(); }catch(_){} } };
-  }
-
-// ---------------- Tap handling ----------------
-  // IMPORTANT: iOS may fire both pointer + touch events unless we avoid double-binding.
-  // We bind ONE unified handler (pointer if available, else touch).
-  let lastTap = null; // {t,x,y}
-  let activeCapture = null; // {circle, idx}
-
-  function findCircleHit(x,y){
+  function findTappedCircle(x,y){
     for(let i=circles.length-1;i>=0;i--){
       const c = circles[i];
-      const r = radius(c);
-      const rr = r + tapPad*dpr;
-      const dx=x-c.x, dy=y-c.y;
-      if(dx*dx + dy*dy <= rr*rr) return {i,c,r};
+      if(c.state !== 'normal') continue;
+      const r = circleRadius(c);
+      const d = Math.hypot(x-c.x, y-c.y);
+      if(d <= r) return {c, d, r};
     }
     return null;
   }
 
-  function doPopAtCircle(idx, c){
-    circles.splice(idx,1);
-
-    // Local purple haze puff (no screen-wide flash)
-    addPurplePuff(c.x, c.y, radius(c));
-
-    // piglet "pop" (a slightly sharper oink)
-    pigOink(0.26, 0.10, 520);
-  }
-
-  function beginCapture(hit, tx, ty, clientX, clientY){
-    if(!hit) return false;
-    const {i,c,r} = hit;
-
-    // only one capture at a time
-    if(activeCapture && activeCapture.circle && activeCapture.circle._captured){
-      activeCapture.circle._captured = null;
-    }
-    activeCapture = { circle:c, idx:i };
-
-    const p = c.x, q = c.y;
-    const distPQ = Math.hypot(p-tx, q-ty);
-
-    // "under the thumb" squiggle for a short moment
-    const dur = 320; // ms
-    const now = performance.now();
-    c._captured = { tx, ty, t0: now, until: now + dur, p, q, r, distPQ, vx:c.vx, vy:c.vy };
-
-    // "feel" the poke: flatten while captured
-    c._squashX = 1.18;
-    c._squashY = 0.72;
-
-    // piglet oik‑oik while captured
-    oikOik();
-
-    // piglet VIDEO clip at capture point (or emoji fallback if missing)
-    const capPiglet = showPigletClip(clientX ?? (tx/dpr), clientY ?? (ty/dpr));
-
-    // decide after squiggle: POP if tap is close enough; else ESCAPE
-    setTimeout(()=>{
-      // circle may already be gone or re-captured
-      const ci = circles.indexOf(c);
-      if(capPiglet) capPiglet.remove();
-      if(ci === -1) return;
-      const cap = c._captured;
-      c._captured = null;
-
-      // restore shape
-      c._squashX = 1;
-      c._squashY = 1;
-
-      // POP rule
-      if(cap && cap.distPQ < (0.5 * cap.r)){
-        doPopAtCircle(ci, c);
-        return;
-      }
-
-      // ESCAPE (your 4 quadrant rules all map to escape if not pop)
-      // direction: from tap (x,y) toward original center (p,q); speed doubled
-      const dx = (cap ? cap.p : c.x) - (cap ? cap.tx : tx);
-      const dy = (cap ? cap.q : c.y) - (cap ? cap.ty : ty);
-      const d  = Math.hypot(dx,dy) || 1;
-      const ux = dx/d, uy = dy/d;
-
-      const base = Math.hypot(cap?.vx ?? c.vx, cap?.vy ?? c.vy);
-      const sp = Math.max(1.6*dpr, base) * 2.0;
-
-      c.vx = ux * sp;
-      c.vy = uy * sp;
-
-      // nudge it immediately so it "breaks free"
-      c.x = (cap ? cap.tx : tx) + ux * (cap ? cap.r : radius(c)) * 0.65;
-      c.y = (cap ? cap.ty : ty) + uy * (cap ? cap.r : radius(c)) * 0.65;
-
-    }, dur);
-
-    return true;
-  }
-
-  function getXY(e){
-    const rect = canvas.getBoundingClientRect();
-    let cx, cy;
-    if(e.touches && e.touches[0]){ cx = e.touches[0].clientX; cy = e.touches[0].clientY; }
-    else { cx = e.clientX; cy = e.clientY; }
-    return { 
-      x:(cx-rect.left)*dpr, 
-      y:(cy-rect.top)*dpr,
-      cx, cy
-    };
-  }
-
-  function togglePanel(){
-    panel.style.display = (panel.style.display==="none") ? "block" : "none";
-  }
-
-  function onUnifiedTap(e){
-    // Ignore right-click
-    if(e.button && e.button !== 0) return;
-
-    const {x,y,cx,cy} = getXY(e);
-    const now = performance.now();
-    const doubleDist2 = (26*dpr) * (26*dpr);
-    const isDouble = !!(lastTap && (now-lastTap.t)<300 && ((x-lastTap.x)**2 + (y-lastTap.y)**2) < doubleDist2);
-
-    if(isDouble){
-      lastTap = null;
-      togglePanel();
-      e.preventDefault();
+  let lastBgTapTime = 0;
+  let lastBgX = 0, lastBgY = 0;
+  function onTap(e){
+    e.preventDefault();
+    if(playEnded) return;
+    ensureAudio();
+    primeAudios();
+    const {x,y} = canvasPoint(e);
+    const hit = findTappedCircle(x,y);
+    if(hit){
+      if(hit.d < 0.5 * hit.r) handlePop(hit.c);
+      else pokePiglet(hit.c, x, y);
       return;
     }
-    lastTap = {t:now,x,y};
-
-    ensureAudio();
-    const hit = findCircleHit(x,y);
-    if(hit) beginCapture(hit, x, y, cx, cy);
-    e.preventDefault();
+    const now = performance.now();
+    const close = Math.hypot(x-lastBgX, y-lastBgY) < 36*dpr;
+    if(now - lastBgTapTime < 320 && close){
+      panel.style.display = (panel.style.display === 'none') ? 'block' : 'none';
+      lastBgTapTime = 0;
+    } else {
+      lastBgTapTime = now;
+      lastBgX = x; lastBgY = y;
+    }
   }
 
-  if(window.PointerEvent){
-    canvas.addEventListener("pointerdown", onUnifiedTap, {passive:false});
-  } else {
-    canvas.addEventListener("touchstart", onUnifiedTap, {passive:false});
-    canvas.addEventListener("mousedown", onUnifiedTap, {passive:false});
-  }
+  canvas.addEventListener('pointerdown', onTap, {passive:false});
+  canvas.addEventListener('touchstart', onTap, {passive:false});
+  canvas.addEventListener('mousedown', onTap, {passive:false});
 
-  // ---------------- UI buttons ----------------
-  document.getElementById("reset").onclick = ()=> seed(18);
-  document.getElementById("pause").onclick = ()=> paused = !paused;
-
-  const soundBtn = document.getElementById("soundBtn");
-  soundBtn.onclick = () => {
+  document.getElementById('reset').onclick = ()=> seed();
+  document.getElementById('again').onclick = ()=> seed();
+  document.getElementById('pause').onclick = ()=> { paused = !paused; document.getElementById('pause').textContent = paused ? 'Resume' : 'Pause'; };
+  document.getElementById('soundBtn').onclick = () => {
     audioOn = !audioOn;
-    soundBtn.textContent = audioOn ? "Sound On" : "Sound Off";
-    thunder.muted = !audioOn;
-    if(audioOn) ensureAudio();
+    document.getElementById('soundBtn').textContent = audioOn ? 'Sound On' : 'Sound Off';
   };
-
 })();
 </script>
-
-<!--
-USING YOUR OWN FILES (GitHub Pages):
-1) Put thunder MP3 here:
-   assets/sfx/thunder.mp3
-
-2) Put a lightning image (PNG with transparency recommended) here:
-   assets/img/lightning.png
-
-If you want different filenames, edit these two lines in the code:
-  const thunder = new Audio("assets/sfx/thunder.mp3");
-  lightningImg.src = "assets/img/lightning.png";
--->
 </body>
 </html>
