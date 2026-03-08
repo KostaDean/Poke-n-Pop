@@ -274,6 +274,20 @@
     }
   }
 
+  function dustPathPuff(x,y,nx,ny,spread=1){
+    const sideX = -ny, sideY = nx;
+    const count = Math.round(4 + 3*spread);
+    for(let i=0;i<count;i++){
+      const side = rand(-10, 10) * dpr * spread;
+      const jitter = rand(-5, 5) * dpr;
+      const px = x + sideX*side + nx*jitter;
+      const py = y + sideY*side + ny*jitter;
+      const vx = nx * rand(0.2, 1.0) * dpr + sideX * rand(-0.5,0.5) * dpr;
+      const vy = ny * rand(0.2, 1.0) * dpr + sideY * rand(-0.5,0.5) * dpr;
+      particles.push({kind:'dust',x:px,y:py,vx,vy,life:rand(0.7,1.15),r:rand(8,16)*dpr});
+    }
+  }
+
   function removeCircle(c){
     const i = circles.indexOf(c);
     if(i>=0) circles.splice(i,1);
@@ -304,7 +318,8 @@
     c.spriteFrame = 0;
     c.spriteClock = 0;
     c.escapeProg = 0;
-    c.escapeDur = wasLastRemaining ? 1150 : rand(850, 1150);
+    c.escapeDur = wasLastRemaining ? 1200 : rand(900, 1200);
+    c.pathProg = 0;
     playOink();
 
     const dx = c.x - tapX, dy = c.y - tapY;
@@ -316,6 +331,7 @@
     c.safeY = clamp(c.y + ny*safe, circleRadius(c), canvas.height-circleRadius(c));
     c.safeVx = nx * rand(0.40*maxSpeed, 0.80*maxSpeed) * dpr;
     c.safeVy = ny * rand(0.40*maxSpeed, 0.80*maxSpeed) * dpr;
+    c.pathProg = 0;
     c.faceLeft = nx < 0;
     c.lookFaceLeft = !c.faceLeft;
     dustTrail(c.x, c.y, nx, ny, 1.15);
@@ -326,6 +342,7 @@
     c.spriteClock = 0;
     c.spriteFrame = 0;
     c.escapeProg = 0;
+    c.pathProg = 0;
   }
 
   function beginLookback(c){
@@ -387,8 +404,15 @@
       c.escapeProg = Math.min(1, c.escapeProg + (dt*16.6667) / c.escapeDur);
       c.spriteClock += dt;
       if(c.spriteClock > 6.8){ c.spriteClock = 0; c.spriteFrame = (c.spriteFrame + 1) % ESC_FRAMES; }
-      if(Math.random() < 0.42) dustTrail(c.x, c.y, c.runNx, c.runNy, 0.7 + 0.6*c.escapeProg);
+      const targetProg = c.escapeProg;
+      while(c.pathProg + 0.10 <= targetProg){
+        c.pathProg += 0.10;
+        const px = c.oldX + (c.safeX - c.oldX) * c.pathProg;
+        const py = c.oldY + (c.safeY - c.oldY) * c.pathProg;
+        dustPathPuff(px, py, c.runNx, c.runNy, 0.95);
+      }
       if(c.escapeProg >= 1){
+        dustPathPuff(c.safeX, c.safeY, c.runNx, c.runNy, 1.6);
         beginLookback(c);
       }
     } else if(c.state === 'look'){
@@ -450,6 +474,16 @@
         const localX = c.x + c.runNx * (8 + 9*Math.sin(c.escapeProg*Math.PI*4)) * dpr;
         const localY = c.y + Math.sin(c.escapeProg*Math.PI*8) * 5 * dpr;
         if(escapeReady) drawSprite(escapeSprite, c.spriteFrame, ESC_W, ESC_H, localX, localY, size, c.faceLeft);
+        ctx.save();
+        ctx.globalAlpha = 0.22 + 0.18*Math.sin(c.escapeProg*Math.PI);
+        ctx.strokeStyle = '#d7c4a1';
+        ctx.lineWidth = 10 * dpr;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(c.oldX, c.oldY);
+        ctx.lineTo(c.safeX, c.safeY);
+        ctx.stroke();
+        ctx.restore();
       } else if(c.state === 'look'){
         const size = circleRadius(c)*3.0;
         if(lookReady) drawSprite(lookSprite, c.spriteFrame, LOOK_W, LOOK_H, c.x, c.y, size, c.lookFaceLeft);
