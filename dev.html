@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>Screamsaver — Piglet Escape Connected</title>
+<title>Screamsaver — Piglet Escape Clean</title>
 <style>
   html,body{margin:0;height:100%;background:#000;overflow:hidden;font-family:system-ui,-apple-system,sans-serif}
   canvas{display:block;width:100vw;height:100vh;touch-action:none}
@@ -71,7 +71,7 @@
     • Tap inside the inner half-radius to POP.<br>
     • Tap the outer half of a circle to poke it, hear an oink, and make the piglet escape.<br>
     • Some escaping piglets stop, look back in triumph, then continue.<br>
-    • Double-tap the empty background to hide/show this panel.<br>
+    • Only a true double-tap on empty background hides/shows this panel.<br>
     • Play ends when all 10 circles are popped. Score = time from first pop to last pop.
   </div>
 </div>
@@ -222,7 +222,8 @@
       safeX: 0,
       safeY: 0,
       faceLeft: false,
-      lookFaceLeft: false
+      lookFaceLeft: false,
+      forceFinalTriumph: false
     };
   }
 
@@ -280,6 +281,8 @@
   }
 
   function pokePiglet(c, tapX, tapY){
+    const wasLastRemaining = circles.length === 1;
+    c.forceFinalTriumph = wasLastRemaining;
     c.state = 'poked';
     c.stateUntil = performance.now() + 650;
     c.oldX = c.x;
@@ -294,7 +297,7 @@
     const safe = (170 + Math.random()*110) * dpr;
     c.safeX = clamp(c.x + nx*safe, circleRadius(c), canvas.width-circleRadius(c));
     c.safeY = clamp(c.y + ny*safe, circleRadius(c), canvas.height-circleRadius(c));
-    c.lookBack = Math.random() < 0.20;
+    c.lookBack = c.forceFinalTriumph || (Math.random() < 0.20);
     c.safeVx = nx * rand(0.40*maxSpeed, 0.80*maxSpeed) * dpr;
     c.safeVy = ny * rand(0.40*maxSpeed, 0.80*maxSpeed) * dpr;
     c.faceLeft = nx < 0;
@@ -308,7 +311,7 @@
 
   function beginLookback(c){
     c.state = 'look';
-    c.stateUntil = performance.now() + 650;
+    c.stateUntil = performance.now() + (c.forceFinalTriumph ? 1000 : 650);
     c.spriteClock = 0;
     c.spriteFrame = 0;
     c.vx = 0; c.vy = 0;
@@ -316,6 +319,11 @@
   }
 
   function endLookback(c){
+    if(c.forceFinalTriumph){
+      c.forceFinalTriumph = false;
+      handlePop(c);
+      return;
+    }
     c.state = 'normal';
     c.vx = c.safeVx;
     c.vy = c.safeVy;
@@ -486,9 +494,9 @@
     }
   }
 
-  canvas.addEventListener('pointerdown', onTap, {passive:false});
-  canvas.addEventListener('touchstart', onTap, {passive:false});
-  canvas.addEventListener('mousedown', onTap, {passive:false});
+  // Use one unified tap handler only. Multiple listeners were causing a single tap
+  // to be counted twice on iPhone, which made the panel toggle on one tap.
+  canvas.addEventListener('pointerup', onTap, {passive:false});
 
   document.getElementById('reset').onclick = ()=> seed();
   document.getElementById('again').onclick = ()=> seed();
