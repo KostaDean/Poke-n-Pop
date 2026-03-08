@@ -69,8 +69,8 @@
 
   <div class="hint">
     • Tap inside the inner half-radius to POP.<br>
-    • Tap the outer half of a circle to poke it, hear an oink, and make the piglet escape.<br>
-    • Some escaping piglets stop, look back in triumph, then continue.<br>
+    • Tap the outer half of a circle to poke it, hear an oink, and trigger a local piglet scramble with dust-cloud escape.<br>
+    • Every escape ends with a triumphant look-back before the circle resumes moving.<br>
     • Only a true double-tap on empty background hides/shows this panel.<br>
     • Play ends when all 10 circles are popped. Score = time from first pop to last pop.
   </div>
@@ -256,7 +256,21 @@
   function burst(x,y){
     for(let i=0;i<14;i++){
       const a = rand(0, Math.PI*2), s = rand(2, 9)*dpr;
-      particles.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:1,r:rand(2,5)*dpr});
+      particles.push({kind:'spark',x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:1,r:rand(2,5)*dpr});
+    }
+  }
+
+  function dustTrail(x,y,nx,ny,power=1){
+    const sideX = -ny, sideY = nx;
+    const count = Math.round(10 + 8*power);
+    for(let i=0;i<count;i++){
+      const back = rand(10, 28) * dpr;
+      const side = rand(-12, 12) * dpr;
+      const px = x - nx*back + sideX*side;
+      const py = y - ny*back + sideY*side;
+      const vx = nx * rand(2.0, 4.8) * dpr + sideX * rand(-0.8,0.8) * dpr;
+      const vy = ny * rand(2.0, 4.8) * dpr + sideY * rand(-0.8,0.8) * dpr;
+      particles.push({kind:'dust',x:px,y:py,vx,vy,life:rand(0.55,1.0),r:rand(6,14)*dpr});
     }
   }
 
@@ -284,38 +298,44 @@
     const wasLastRemaining = circles.length === 1;
     c.forceFinalTriumph = wasLastRemaining;
     c.state = 'poked';
-    c.stateUntil = performance.now() + 650;
+    c.stateUntil = performance.now() + 550;
     c.oldX = c.x;
     c.oldY = c.y;
     c.spriteFrame = 0;
     c.spriteClock = 0;
+    c.escapeProg = 0;
+    c.escapeDur = wasLastRemaining ? 1150 : rand(850, 1150);
     playOink();
 
     const dx = c.x - tapX, dy = c.y - tapY;
     const len = Math.hypot(dx,dy) || 1;
     const nx = dx/len, ny = dy/len;
-    const safe = (170 + Math.random()*110) * dpr;
+    c.runNx = nx; c.runNy = ny;
+    const safe = (165 + Math.random()*105) * dpr;
     c.safeX = clamp(c.x + nx*safe, circleRadius(c), canvas.width-circleRadius(c));
     c.safeY = clamp(c.y + ny*safe, circleRadius(c), canvas.height-circleRadius(c));
-    c.lookBack = c.forceFinalTriumph || (Math.random() < 0.20);
     c.safeVx = nx * rand(0.40*maxSpeed, 0.80*maxSpeed) * dpr;
     c.safeVy = ny * rand(0.40*maxSpeed, 0.80*maxSpeed) * dpr;
     c.faceLeft = nx < 0;
+    c.lookFaceLeft = !c.faceLeft;
+    dustTrail(c.x, c.y, nx, ny, 1.15);
   }
 
   function startEscape(c){
     c.state = 'escape';
     c.spriteClock = 0;
     c.spriteFrame = 0;
+    c.escapeProg = 0;
   }
 
   function beginLookback(c){
     c.state = 'look';
+    c.x = c.safeX;
+    c.y = c.safeY;
     c.stateUntil = performance.now() + (c.forceFinalTriumph ? 1000 : 650);
     c.spriteClock = 0;
     c.spriteFrame = 0;
     c.vx = 0; c.vy = 0;
-    c.lookFaceLeft = !c.faceLeft;
   }
 
   function endLookback(c){
@@ -358,21 +378,19 @@
     } else if(c.state === 'poked'){
       c.x = c.oldX;
       c.y = c.oldY;
+      c.spriteClock += dt;
+      if(c.spriteClock > 7.5){ c.spriteClock = 0; c.spriteFrame = (c.spriteFrame + 1) % ESC_FRAMES; }
       if(performance.now() >= c.stateUntil) startEscape(c);
     } else if(c.state === 'escape'){
-      const dx = c.safeX - c.x, dy = c.safeY - c.y;
-      const dist = Math.hypot(dx,dy);
-      const speed = Math.max(1.4, 0.55*maxSpeed) * dpr;
-      if(dist < speed*dt + 2*dpr){
-        c.x = c.safeX; c.y = c.safeY;
-        if(c.lookBack) beginLookback(c);
-        else { c.state = 'normal'; c.vx = c.safeVx; c.vy = c.safeVy; }
-      } else {
-        c.x += dx / dist * speed * dt;
-        c.y += dy / dist * speed * dt;
-      }
+      c.x = c.oldX;
+      c.y = c.oldY;
+      c.escapeProg = Math.min(1, c.escapeProg + (dt*16.6667) / c.escapeDur);
       c.spriteClock += dt;
-      if(c.spriteClock > 6.5){ c.spriteClock = 0; c.spriteFrame = (c.spriteFrame + 1) % ESC_FRAMES; }
+      if(c.spriteClock > 6.8){ c.spriteClock = 0; c.spriteFrame = (c.spriteFrame + 1) % ESC_FRAMES; }
+      if(Math.random() < 0.42) dustTrail(c.x, c.y, c.runNx, c.runNy, 0.7 + 0.6*c.escapeProg);
+      if(c.escapeProg >= 1){
+        beginLookback(c);
+      }
     } else if(c.state === 'look'){
       if(performance.now() >= c.stateUntil) endLookback(c);
       c.spriteClock += dt;
@@ -388,7 +406,17 @@
   function updateParticles(dt){
     for(let i=particles.length-1;i>=0;i--){
       const p = particles[i];
-      p.x += p.vx * dt; p.y += p.vy * dt; p.life -= 0.032*dt; p.r *= 0.985;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      if(p.kind === 'dust'){
+        p.vx *= 0.965;
+        p.vy *= 0.965;
+        p.life -= 0.020*dt;
+        p.r *= 1.01;
+      } else {
+        p.life -= 0.032*dt;
+        p.r *= 0.985;
+      }
       if(p.life <= 0 || p.r < 0.5) particles.splice(i,1);
     }
   }
@@ -411,14 +439,17 @@
         ctx.beginPath(); ctx.arc(c.x,c.y,circleRadius(c),0,Math.PI*2); ctx.fill();
       } else if(c.state === 'poked'){
         const size = circleRadius(c)*2.9;
-        if(escapeReady) drawSprite(escapeSprite, 0, ESC_W, ESC_H, c.x, c.y, size, c.faceLeft);
+        const bob = Math.sin(performance.now()*0.022) * 3 * dpr;
+        if(escapeReady) drawSprite(escapeSprite, c.spriteFrame % ESC_FRAMES, ESC_W, ESC_H, c.x, c.y + bob, size, c.faceLeft);
         else {
           ctx.fillStyle = '#f6b6c2';
           ctx.beginPath(); ctx.arc(c.x,c.y,circleRadius(c),0,Math.PI*2); ctx.fill();
         }
       } else if(c.state === 'escape'){
         const size = circleRadius(c)*3.0;
-        if(escapeReady) drawSprite(escapeSprite, c.spriteFrame, ESC_W, ESC_H, c.x, c.y, size, c.faceLeft);
+        const localX = c.x + c.runNx * (8 + 9*Math.sin(c.escapeProg*Math.PI*4)) * dpr;
+        const localY = c.y + Math.sin(c.escapeProg*Math.PI*8) * 5 * dpr;
+        if(escapeReady) drawSprite(escapeSprite, c.spriteFrame, ESC_W, ESC_H, localX, localY, size, c.faceLeft);
       } else if(c.state === 'look'){
         const size = circleRadius(c)*3.0;
         if(lookReady) drawSprite(lookSprite, c.spriteFrame, LOOK_W, LOOK_H, c.x, c.y, size, c.lookFaceLeft);
@@ -429,8 +460,16 @@
     for(const p of particles){
       ctx.save();
       ctx.globalAlpha = Math.max(0, p.life);
-      ctx.fillStyle = '#ffe88b';
-      ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,Math.PI*2); ctx.fill();
+      if(p.kind === 'dust'){
+        ctx.fillStyle = '#cdbb9a';
+        ctx.beginPath(); ctx.arc(p.x,p.y,p.r*1.25,0,Math.PI*2); ctx.fill();
+        ctx.globalAlpha *= 0.55;
+        ctx.fillStyle = '#efe3c6';
+        ctx.beginPath(); ctx.arc(p.x - p.r*0.18, p.y - p.r*0.18, p.r*0.72, 0, Math.PI*2); ctx.fill();
+      } else {
+        ctx.fillStyle = '#ffe88b';
+        ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,Math.PI*2); ctx.fill();
+      }
       ctx.restore();
     }
   }
