@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no" />
 <title>Piglet Escape Game</title>
 <style>
-  :root{--bg:#143d63;--pink:#e79cab;--text:#eef6ff;}
+  :root{--bg:#143d63;--pink:#e79cab;--text:#eef6ff;--ui:rgba(4,15,26,.92);}
   html,body{
     margin:0;width:100%;height:100%;overflow:hidden;background:var(--bg);
     touch-action:manipulation;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
@@ -13,18 +13,27 @@
   #wrap{position:fixed;inset:0;background:var(--bg);}
   canvas{position:absolute;inset:0;width:100%;height:100%;display:block;}
   #panelBtn{
-    position:absolute;top:max(10px, env(safe-area-inset-top));right:10px;z-index:20;
+    position:absolute;top:max(10px, env(safe-area-inset-top));right:10px;z-index:40;
     font-size:13px;color:white;background:rgba(4,15,26,.86);
     border:1px solid rgba(255,255,255,.14);border-radius:10px;padding:8px 11px;
-    user-select:none;-webkit-user-select:none;touch-action:manipulation;
+    user-select:none;-webkit-user-select:none;touch-action:manipulation;cursor:pointer;
   }
   #panel{
-    position:absolute;top:54px;right:10px;z-index:19;display:none;background:rgba(4,15,26,.92);
+    position:absolute;top:54px;right:10px;z-index:39;display:none;background:var(--ui);
     color:var(--text);border:1px solid rgba(255,255,255,.12);border-radius:14px;padding:12px 14px;
-    min-width:220px;box-shadow:0 12px 30px rgba(0,0,0,.25);font-size:14px;
+    width:250px;box-shadow:0 12px 30px rgba(0,0,0,.25);font-size:14px;
   }
+  #panelHead{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;}
+  #panelTitle{font-weight:700;font-size:16px;}
+  #closePanel{
+    border:0;background:#173149;color:white;border-radius:8px;padding:5px 9px;font-size:12px;
+  }
+  .row{margin:10px 0;}
+  .label{font-size:13px;opacity:.9;margin-bottom:4px;}
+  .value{font-weight:700;}
+  input[type="range"]{width:100%;}
   #score{
-    position:absolute;inset:0;display:none;align-items:center;justify-content:center;z-index:30;
+    position:absolute;inset:0;display:none;align-items:center;justify-content:center;z-index:50;
     background:rgba(5,16,24,.48);color:white;text-align:center;
   }
   #scoreCard{
@@ -39,17 +48,31 @@
 <body>
 <div id="wrap">
   <canvas id="game"></canvas>
-  <div id="panelBtn">Control Panel</div>
+  <button id="panelBtn" type="button">Control Panel</button>
+
   <div id="panel">
-    <div><strong>Double-tap empty space</strong></div>
-    <div style="margin-top:6px; opacity:.85;">or tap the Control Panel button.</div>
+    <div id="panelHead">
+      <div id="panelTitle">Control Panel</div>
+      <button id="closePanel" type="button">Close</button>
+    </div>
+
+    <div class="row">
+      <div class="label">Max speed: <span id="speedVal" class="value">95</span></div>
+      <input id="speedSlider" type="range" min="40" max="180" step="5" value="95">
+    </div>
+
+    <div class="row">
+      <div class="label">Panel toggle</div>
+      <div>Tap the <strong>Control Panel</strong> button.</div>
+    </div>
   </div>
+
   <div id="score">
     <div id="scoreCard">
       <div id="scoreSmall">Elapsed time</div>
       <div id="scoreTime">0.00 s</div>
       <div id="scoreSmall">from first capture to final finish</div>
-      <button id="playBtn">Play Again</button>
+      <button id="playBtn" type="button">Play Again</button>
     </div>
   </div>
 </div>
@@ -60,6 +83,9 @@
   const ctx = canvas.getContext('2d');
   const panel = document.getElementById('panel');
   const panelBtn = document.getElementById('panelBtn');
+  const closePanel = document.getElementById('closePanel');
+  const speedSlider = document.getElementById('speedSlider');
+  const speedVal = document.getElementById('speedVal');
   const score = document.getElementById('score');
   const scoreTime = document.getElementById('scoreTime');
   const playBtn = document.getElementById('playBtn');
@@ -83,6 +109,7 @@
   let gameEnded = false;
   let firstCaptureAt = null;
   let finalScoreMs = 0;
+  let maxSpeed = 95;
 
   function resize(){
     W = window.innerWidth; H = window.innerHeight;
@@ -106,19 +133,26 @@
   function togglePanel(){
     panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
   }
-  function panelToggleHandler(e){
-    e.preventDefault();
-    e.stopPropagation();
-    togglePanel();
-  }
-  panelBtn.addEventListener('click', panelToggleHandler, {passive:false});
-  panelBtn.addEventListener('pointerup', panelToggleHandler, {passive:false});
-  panelBtn.addEventListener('touchend', panelToggleHandler, {passive:false});
+  panelBtn.onclick = function(ev){ ev.preventDefault(); ev.stopPropagation(); togglePanel(); };
+  closePanel.onclick = function(ev){ ev.preventDefault(); ev.stopPropagation(); panel.style.display='none'; };
+
+  speedSlider.oninput = function(){
+    maxSpeed = Number(speedSlider.value);
+    speedVal.textContent = String(maxSpeed);
+    for(const p of pigs){
+      if (p.state === 'circle'){
+        const a = Math.atan2(p.vy, p.vx);
+        const s = Math.min(Math.hypot(p.vx,p.vy), maxSpeed);
+        p.vx = Math.cos(a) * s;
+        p.vy = Math.sin(a) * s;
+      }
+    }
+  };
 
   function makePig(){
     const margin = 60;
     const x = rand(margin, W-margin), y = rand(margin+30, H-margin-40);
-    const a = rand(0, Math.PI*2), s = rand(55, 95);
+    const a = rand(0, Math.PI*2), s = rand(55, maxSpeed);
     return {
       x, y, r:R, vx:Math.cos(a)*s, vy:Math.sin(a)*s,
       state:'circle', t:0, frame:0, frameTime:0, dust:[],
@@ -136,7 +170,7 @@
     panel.style.display = 'none';
   }
   resetGame();
-  playBtn.addEventListener('click', resetGame);
+  playBtn.onclick = resetGame;
 
   function countCircles(){
     return pigs.filter(p => p.state === 'circle').length;
@@ -189,22 +223,15 @@
     return null;
   }
 
-  let lastTapTime = 0, lastTapX = 0, lastTapY = 0;
   canvas.addEventListener('pointerup', (e) => {
     if (gameEnded) return;
     const rect = canvas.getBoundingClientRect();
     const x = e.clientX - rect.left, y = e.clientY - rect.top;
     const hit = topCircleAt(x,y);
-
-    const now = performance.now();
-    const isDouble = !hit && (now - lastTapTime < 320) && dist(x,y,lastTapX,lastTapY) < 34;
-    lastTapTime = now; lastTapX = x; lastTapY = y;
-    if (isDouble){ togglePanel(); return; }
     if (!hit) return;
 
     const circlesBefore = countCircles();
 
-    // last remaining circle ALWAYS becomes final escape + prolonged lookback
     if (circlesBefore === 1){
       startEscape(hit, x, y, true);
       return;
@@ -277,7 +304,7 @@
           setTimeout(showScore, 100);
         } else {
           p.state = 'circle';
-          const a = rand(0, Math.PI*2), s = rand(55,95);
+          const a = rand(0, Math.PI*2), s = rand(55,maxSpeed);
           p.vx = Math.cos(a)*s; p.vy = Math.sin(a)*s;
         }
       }
