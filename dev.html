@@ -91,83 +91,60 @@ let difficulty = 1.0, currentSpeedCap = 110;
 let lastBgTapTime = 0, lastBgX = 0, lastBgY = 0;
 let inputLocked = false;
 
-let ac = null, masterGain = null, collisionBus = null, lastCollisionSoundAt = 0;
+let ac = null, masterGain = null, lastCollisionSoundAt = 0;
 
 function ensureAudio(){
   if(!ac){
     ac = new (window.AudioContext || window.webkitAudioContext)();
-
     masterGain = ac.createGain();
-    masterGain.gain.value = 0.34;
-    masterGain.connect(ac.destination);
-
-    collisionBus = ac.createGain();
-    collisionBus.gain.value = 0.72;
-
-    const collisionHP = ac.createBiquadFilter();
-    collisionHP.type = 'highpass';
-    collisionHP.frequency.value = 180;
-
-    const collisionLP = ac.createBiquadFilter();
-    collisionLP.type = 'lowpass';
-    collisionLP.frequency.value = 2600;
-
-    collisionBus.connect(collisionHP);
-    collisionHP.connect(collisionLP);
-    collisionLP.connect(masterGain);
+    masterGain.gain.value = 0.42;
+    const comp = ac.createDynamicsCompressor();
+    comp.threshold.value = -24;
+    comp.knee.value = 18;
+    comp.ratio.value = 8;
+    comp.attack.value = 0.003;
+    comp.release.value = 0.12;
+    masterGain.connect(comp);
+    comp.connect(ac.destination);
   }
   if(ac.state === 'suspended') ac.resume().catch(()=>{});
 }
 
 function collisionTick(strength=1){
-  if(!ac || !masterGain || !collisionBus) return;
+  if(!ac || !masterGain) return;
   const now = ac.currentTime;
-  const hit = Math.max(0.55, Math.min(2.2, strength));
+  const amt = Math.min(2.2, Math.max(0.7, strength));
 
-  const body = ac.createOscillator();
-  body.type = 'triangle';
-  body.frequency.setValueAtTime(220 + 90 * hit, now);
-  body.frequency.exponentialRampToValueAtTime(120 + 25 * hit, now + 0.055);
+  const osc1 = ac.createOscillator();
+  const osc2 = ac.createOscillator();
+  const gain = ac.createGain();
+  const filter = ac.createBiquadFilter();
 
-  const click = ac.createOscillator();
-  click.type = 'square';
-  click.frequency.setValueAtTime(880 + 240 * hit, now);
-  click.frequency.exponentialRampToValueAtTime(320 + 40 * hit, now + 0.025);
+  osc1.type = 'square';
+  osc2.type = 'triangle';
+  osc1.frequency.setValueAtTime(920 + 260 * amt, now);
+  osc1.frequency.exponentialRampToValueAtTime(340, now + 0.09);
+  osc2.frequency.setValueAtTime(520 + 120 * amt, now);
+  osc2.frequency.exponentialRampToValueAtTime(180, now + 0.11);
 
-  const noiseBuffer = ac.createBuffer(1, Math.max(1, Math.floor(ac.sampleRate * 0.035)), ac.sampleRate);
-  const data = noiseBuffer.getChannelData(0);
-  for(let i=0;i<data.length;i++) data[i] = (Math.random()*2-1) * Math.exp(-4*i/data.length);
-  const noise = ac.createBufferSource();
-  noise.buffer = noiseBuffer;
+  filter.type = 'bandpass';
+  filter.frequency.setValueAtTime(1650, now);
+  filter.Q.value = 0.8;
 
-  const bodyGain = ac.createGain();
-  bodyGain.gain.setValueAtTime(0.0001, now);
-  bodyGain.gain.exponentialRampToValueAtTime(0.055 * hit, now + 0.004);
-  bodyGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.08);
+  gain.gain.setValueAtTime(0.0001, now);
+  gain.gain.exponentialRampToValueAtTime(0.11 * amt, now + 0.004);
+  gain.gain.exponentialRampToValueAtTime(0.02 * amt, now + 0.045);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.13);
 
-  const clickGain = ac.createGain();
-  clickGain.gain.setValueAtTime(0.0001, now);
-  clickGain.gain.exponentialRampToValueAtTime(0.03 * hit, now + 0.0025);
-  clickGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.028);
+  osc1.connect(filter);
+  osc2.connect(filter);
+  filter.connect(gain);
+  gain.connect(masterGain);
 
-  const noiseGain = ac.createGain();
-  noiseGain.gain.setValueAtTime(0.0001, now);
-  noiseGain.gain.exponentialRampToValueAtTime(0.024 * hit, now + 0.0015);
-  noiseGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.03);
-
-  body.connect(bodyGain);
-  click.connect(clickGain);
-  noise.connect(noiseGain);
-  bodyGain.connect(collisionBus);
-  clickGain.connect(collisionBus);
-  noiseGain.connect(collisionBus);
-
-  body.start(now);
-  click.start(now);
-  noise.start(now);
-  body.stop(now + 0.09);
-  click.stop(now + 0.03);
-  noise.stop(now + 0.032);
+  osc1.start(now);
+  osc2.start(now);
+  osc1.stop(now + 0.14);
+  osc2.stop(now + 0.14);
 }
 
 function resize(){ W = window.innerWidth; H = window.innerHeight; canvas.width = W; canvas.height = H; }
@@ -281,10 +258,9 @@ function collide(a,b){
       const impulse = -vn;
       a.vx -= impulse*nx; a.vy -= impulse*ny; b.vx += impulse*nx; b.vy += impulse*ny;
       const now = performance.now();
-      if(now - lastCollisionSoundAt > 36){
+      if(now - lastCollisionSoundAt > 28){
         lastCollisionSoundAt = now;
-        ensureAudio();
-        collisionTick(Math.min(2.0, 0.75 + Math.abs(vn)/36));
+        collisionTick(0.9 + Math.min(1.4, Math.abs(vn)/28));
       }
     }
     bounceWalls(a); bounceWalls(b);
