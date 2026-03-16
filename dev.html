@@ -91,31 +91,83 @@ let difficulty = 1.0, currentSpeedCap = 110;
 let lastBgTapTime = 0, lastBgX = 0, lastBgY = 0;
 let inputLocked = false;
 
-let ac = null, masterGain = null, lastCollisionSoundAt = 0;
+let ac = null, masterGain = null, collisionBus = null, lastCollisionSoundAt = 0;
 
 function ensureAudio(){
   if(!ac){
     ac = new (window.AudioContext || window.webkitAudioContext)();
+
     masterGain = ac.createGain();
-    masterGain.gain.value = 0.18;
+    masterGain.gain.value = 0.34;
     masterGain.connect(ac.destination);
+
+    collisionBus = ac.createGain();
+    collisionBus.gain.value = 0.72;
+
+    const collisionHP = ac.createBiquadFilter();
+    collisionHP.type = 'highpass';
+    collisionHP.frequency.value = 180;
+
+    const collisionLP = ac.createBiquadFilter();
+    collisionLP.type = 'lowpass';
+    collisionLP.frequency.value = 2600;
+
+    collisionBus.connect(collisionHP);
+    collisionHP.connect(collisionLP);
+    collisionLP.connect(masterGain);
   }
   if(ac.state === 'suspended') ac.resume().catch(()=>{});
 }
 
 function collisionTick(strength=1){
-  if(!ac || !masterGain) return;
+  if(!ac || !masterGain || !collisionBus) return;
   const now = ac.currentTime;
-  const osc = ac.createOscillator();
-  const gain = ac.createGain();
-  osc.type = 'triangle';
-  osc.frequency.setValueAtTime(150 + 65 * strength, now);
-  osc.frequency.exponentialRampToValueAtTime(95, now + 0.06);
-  gain.gain.setValueAtTime(0.0001, now);
-  gain.gain.exponentialRampToValueAtTime(0.025 * Math.min(1.8, strength), now + 0.004);
-  gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.07);
-  osc.connect(gain); gain.connect(masterGain);
-  osc.start(now); osc.stop(now + 0.075);
+  const hit = Math.max(0.55, Math.min(2.2, strength));
+
+  const body = ac.createOscillator();
+  body.type = 'triangle';
+  body.frequency.setValueAtTime(220 + 90 * hit, now);
+  body.frequency.exponentialRampToValueAtTime(120 + 25 * hit, now + 0.055);
+
+  const click = ac.createOscillator();
+  click.type = 'square';
+  click.frequency.setValueAtTime(880 + 240 * hit, now);
+  click.frequency.exponentialRampToValueAtTime(320 + 40 * hit, now + 0.025);
+
+  const noiseBuffer = ac.createBuffer(1, Math.max(1, Math.floor(ac.sampleRate * 0.035)), ac.sampleRate);
+  const data = noiseBuffer.getChannelData(0);
+  for(let i=0;i<data.length;i++) data[i] = (Math.random()*2-1) * Math.exp(-4*i/data.length);
+  const noise = ac.createBufferSource();
+  noise.buffer = noiseBuffer;
+
+  const bodyGain = ac.createGain();
+  bodyGain.gain.setValueAtTime(0.0001, now);
+  bodyGain.gain.exponentialRampToValueAtTime(0.055 * hit, now + 0.004);
+  bodyGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.08);
+
+  const clickGain = ac.createGain();
+  clickGain.gain.setValueAtTime(0.0001, now);
+  clickGain.gain.exponentialRampToValueAtTime(0.03 * hit, now + 0.0025);
+  clickGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.028);
+
+  const noiseGain = ac.createGain();
+  noiseGain.gain.setValueAtTime(0.0001, now);
+  noiseGain.gain.exponentialRampToValueAtTime(0.024 * hit, now + 0.0015);
+  noiseGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.03);
+
+  body.connect(bodyGain);
+  click.connect(clickGain);
+  noise.connect(noiseGain);
+  bodyGain.connect(collisionBus);
+  clickGain.connect(collisionBus);
+  noiseGain.connect(collisionBus);
+
+  body.start(now);
+  click.start(now);
+  noise.start(now);
+  body.stop(now + 0.09);
+  click.stop(now + 0.03);
+  noise.stop(now + 0.032);
 }
 
 function resize(){ W = window.innerWidth; H = window.innerHeight; canvas.width = W; canvas.height = H; }
@@ -229,9 +281,10 @@ function collide(a,b){
       const impulse = -vn;
       a.vx -= impulse*nx; a.vy -= impulse*ny; b.vx += impulse*nx; b.vy += impulse*ny;
       const now = performance.now();
-      if(now - lastCollisionSoundAt > 65){
+      if(now - lastCollisionSoundAt > 36){
         lastCollisionSoundAt = now;
-        collisionTick(Math.min(1.4, Math.abs(vn)/55));
+        ensureAudio();
+        collisionTick(Math.min(2.0, 0.75 + Math.abs(vn)/36));
       }
     }
     bounceWalls(a); bounceWalls(b);
